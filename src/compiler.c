@@ -194,6 +194,15 @@ static void statement() {
     emitByte(OP_POP); 
 }
 
+static void returnStatement() {
+    if (parser.current.type == TOKEN_SEMICOLON) {
+        emitByte(OP_RETURN); // Returns nothing/void
+    } else {
+        expression(); // Puts the return value on the stack
+        emitByte(OP_RETURN_VALUE); 
+    }
+}
+
 static void declaration() {
     if (parser.current.type == TOKEN_LOC) {
         advance();
@@ -201,6 +210,9 @@ static void declaration() {
     } else if (parser.current.type == TOKEN_FUNC) {
         advance();
         function();
+    } else if (parser.current.type == TOKEN_RETURN) {
+        advance();
+        returnStatement();
     } else {
         statement();
     }

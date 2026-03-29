@@ -1,3 +1,6 @@
 func main() {
     loc health = 100 -- starting hp
+    50 + 50
+
+    return 0
 }

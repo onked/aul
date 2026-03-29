@@ -76,7 +76,13 @@ static InterpretResult run() {
             }
 
             case OP_RETURN: {
-                printf("Result: %g\n", pop());
+                push(0.0); 
+                return INTERPRET_OK;
+            }
+
+            case OP_RETURN_VALUE: {
+                Value returnValue = pop();
+                push(returnValue); 
                 return INTERPRET_OK;
             }
         }

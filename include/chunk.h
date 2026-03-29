@@ -15,6 +15,7 @@ typedef enum {
     OP_MULTIPLY,      // Multiply top two stack values
     OP_DIVIDE,        // Divide top two stack values
     OP_NEGATE,        // Flip the sign of the top stack value
+    OP_RETURN_VALUE,   // Return a value from a function
     OP_RETURN,        // Exit the current function/script
 } OpCode;
 
