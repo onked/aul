@@ -2,16 +2,19 @@
 #define aul_vm_h
 
 #include "chunk.h"
-#include "value.h" // We'll move the Value typedef here shortly
+#include "value.h"
+#include "table.h"
 
 #define STACK_MAX 256
 
 typedef struct {
-  Chunk* chunk;          // The code we are currently running
-  uint8_t* ip;           // "Instruction Pointer" - points to the next byte to execute
+  Chunk* chunk;
+  uint32_t* ip;
   
-  Value stack[STACK_MAX]; // The VM's workspace
-  Value* stackTop;        // Points to where the next value goes
+  Value registers[STACK_MAX]; 
+  Value* stackTop; 
+
+  Table globals;
 } VM;
 
 typedef enum {
@@ -19,6 +22,9 @@ typedef enum {
   INTERPRET_COMPILE_ERROR,
   INTERPRET_RUNTIME_ERROR
 } InterpretResult;
+
+// Making the VM instance globally accessible across the project
+extern VM vm; 
 
 void initVM();
 void freeVM();

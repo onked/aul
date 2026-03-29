@@ -80,6 +80,7 @@ static void skipWhitespace() {
         advance();
         break;
       case '-':
+        // Ensure we only skip if it's a double-dash comment
         if (peekNext() == '-') {
           while (peek() != '\n' && !isAtEnd()) advance();
         } else {
@@ -126,6 +127,7 @@ static TokenType checkKeyword(int start, int length, const char* rest, TokenType
 }
 
 static TokenType identifierType() {
+  // Explicitly check the first letter to route to keywords
   switch (scanner.start[0]) {
     case 'a': return checkKeyword(1, 2, "nd", TOKEN_AND);
     case 'e': return checkKeyword(1, 3, "lse", TOKEN_ELSE);
@@ -139,12 +141,16 @@ static TokenType identifierType() {
       }
       break;
     case 'i': return checkKeyword(1, 1, "f", TOKEN_IF);
+    case 'l': return checkKeyword(1, 2, "oc", TOKEN_LOC);
+    case 'g': return checkKeyword(1, 2, "lo", TOKEN_GLOBAL);
     case 'n': return checkKeyword(1, 2, "ot", TOKEN_NOT);
+    case 'o': return checkKeyword(1, 1, "r", TOKEN_OR);
     case 'p': return checkKeyword(1, 4, "rint", TOKEN_PRINT);
     case 'r': return checkKeyword(1, 5, "eturn", TOKEN_RETURN);
-    case 'l': return checkKeyword(1, 2, "oc", TOKEN_LOC);
+    case 't': return checkKeyword(1, 3, "rue", TOKEN_TRUE);
     case 'w': return checkKeyword(1, 4, "hile", TOKEN_WHILE);
   }
+  
   return TOKEN_IDENTIFIER;
 }
 

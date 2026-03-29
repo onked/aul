@@ -1,6 +1,4 @@
-#include <stdint.h>
 #include <stdlib.h>
-#include <stddef.h> 
 
 #include "chunk.h"
 #include "memory.h"
@@ -10,58 +8,34 @@ void initChunk(Chunk* chunk) {
     chunk->count = 0;
     chunk->capacity = 0;
     chunk->code = NULL;
+    chunk->lines = NULL; 
     initValueArray(&chunk->constants);
 }
 
-// Add a single byte to the instruction stream.
-void writeChunk(Chunk* chunk, uint8_t byte) {
+// Add a single 32-bit instruction to the stream.
+void writeChunk(Chunk* chunk, uint32_t instruction, int line) {
     if (chunk->capacity < chunk->count + 1) {
         int oldCapacity = chunk->capacity;
-        chunk->capacity = GROW_CAPACITY(oldCapacity);
+        chunk->capacity = (oldCapacity < 8) ? 8 : oldCapacity * 2;
         
-        // Manual expansion for GROW_ARRAY
-        chunk->code = (uint8_t*)reallocate(chunk->code, 
-                                           sizeof(uint8_t) * oldCapacity, 
-                                           sizeof(uint8_t) * chunk->capacity);
+        // We now allocate 4 bytes (sizeof(uint32_t)) for every instruction.
+        chunk->code = reallocate(chunk->code, oldCapacity * sizeof(uint32_t), 
+                                 chunk->capacity * sizeof(uint32_t));
+        chunk->lines = reallocate(chunk->lines, oldCapacity * sizeof(int), 
+                                  chunk->capacity * sizeof(int));
     }
 
-    chunk->code[chunk->count] = byte;
+    chunk->code[chunk->count] = instruction;
+    chunk->lines[chunk->count] = line;
     chunk->count++;
 }
 
 // Wipes the chunk from memory.
 void freeChunk(Chunk* chunk) {
-    // Manual expansion for FREE_ARRAY
-    reallocate(chunk->code, sizeof(uint8_t) * chunk->capacity, 0);
+    reallocate(chunk->code, sizeof(uint32_t) * chunk->capacity, 0);
+    reallocate(chunk->lines, sizeof(int) * chunk->capacity, 0);
     freeValueArray(&chunk->constants);
     initChunk(chunk);
-}
-
-// Value array
-void initValueArray(ValueArray* array) {
-    array->values = NULL;
-    array->capacity = 0;
-    array->count = 0;
-}
-
-void writeValueArray(ValueArray* array, Value value) {
-    if (array->capacity < array->count + 1) {
-        int oldCapacity = array->capacity;
-        array->capacity = GROW_CAPACITY(oldCapacity);
-        
-        array->values = (Value*)reallocate(array->values, 
-                                           sizeof(Value) * oldCapacity, 
-                                           sizeof(Value) * array->capacity);
-    }
-
-    array->values[array->count] = value;
-    array->count++;
-}
-
-void freeValueArray(ValueArray* array) {
-    // Manual expansion for FREE_ARRAY
-    reallocate(array->values, sizeof(Value) * array->capacity, 0);
-    initValueArray(array);
 }
 
 // Returns the index of the added constant.

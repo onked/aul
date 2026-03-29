@@ -1,6 +1,5 @@
 func main() {
-    loc health = 100 -- starting hp
-    50 + 50
-
-    return 0
+    loc broj = 15
+    print broj
 }
+print 36

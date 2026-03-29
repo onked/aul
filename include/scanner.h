@@ -21,7 +21,7 @@ typedef enum {
   TOKEN_IF, TOKEN_ELSE, TOKEN_FUNC, TOKEN_LOC, 
   TOKEN_RETURN, TOKEN_TRUE, TOKEN_FALSE,
   TOKEN_FOR, TOKEN_WHILE, TOKEN_PRINT,
-  TOKEN_AND, TOKEN_OR, TOKEN_NOT,
+  TOKEN_AND, TOKEN_OR, TOKEN_NOT, TOKEN_GLOBAL,
 
   TOKEN_ERROR, // Useful for when the scanner finds something weird
   TOKEN_EOF    // End of File

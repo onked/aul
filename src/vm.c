@@ -1,103 +1,156 @@
 #include <stdio.h>
-#include <stdbool.h>
+#include <stdarg.h>
+#include <string.h>
+
 #include "compiler.h"
 #include "debug.h"
 #include "vm.h"
+#include "table.h"
+#include "object.h"
+#include "memory.h"
 
-#define DEBUG_TRACE_EXECUTION 
+#define DEBUG_TRACE_EXECUTION
 
-VM vm; 
+VM vm;
 
-static void resetStack() {
-    vm.stackTop = vm.stack;
+static void resetStack()
+{
+    vm.stackTop = vm.registers;
 }
 
-void initVM() {
+// Helper for runtime errors (like adding a string to a number)
+static void runtimeError(const char *format, ...) {
+    va_list args;
+    va_start(args, format);
+    vfprintf(stderr, format, args);
+    va_end(args);
+    fputs("\n", stderr);
+
+    size_t instruction = vm.ip - vm.chunk->code - 1;
+    int line = vm.chunk->lines[instruction];
+    fprintf(stderr, "[line %d] in script\n", line);
+    
     resetStack();
 }
 
-void freeVM() {}
-
-void push(Value value) {
-    *vm.stackTop = value;
-    vm.stackTop++;
+void initVM()
+{
+    resetStack();
+    // Initialize our global variable storage
+    initTable(&vm.globals);
 }
 
-Value pop() {
-    vm.stackTop--;
-    return *vm.stackTop;
+void freeVM()
+{
+    // Clean up globals when the VM shuts down
+    freeTable(&vm.globals);
 }
 
 static InterpretResult run() {
-#define READ_BYTE() (*vm.ip++)
-#define READ_CONSTANT() (vm.chunk->constants.values[READ_BYTE()])
+    printf("VM STARTED\n");
+
+// Read the current 32-bit instruction and move to the next
+#define READ_INST() (*vm.ip++)
+
+// Helper to get a constant using the Bx index from the instruction
+#define READ_CONSTANT(inst) (vm.chunk->constants.values[GET_Bx(inst)])
+
+// Register access helper
+#define REG(index) (vm.registers[index])
 
 #define BINARY_OP(op) \
     do { \
-      double b = pop(); \
-      double a = pop(); \
-      push(a op b); \
+        uint32_t inst = vm.ip[-1]; \
+        Value b = REG(GET_C(inst)); \
+        Value a = REG(GET_B(inst)); \
+        if (!IS_NUMBER(a) || !IS_NUMBER(b)) { \
+            runtimeError("Operands must be numbers."); \
+            return INTERPRET_RUNTIME_ERROR; \
+        } \
+        REG(GET_A(inst)) = NUMBER_VAL(AS_NUMBER(a) op AS_NUMBER(b)); \
     } while (false)
 
     for (;;) {
 #ifdef DEBUG_TRACE_EXECUTION
-        // This prints the current state of the stack before every instruction
-        printf("          ");
-        for (Value* slot = vm.stack; slot < vm.stackTop; slot++) {
-            printf("[ ");
-            printf("%g", *slot);
-            printf(" ]");
-        }
-        printf("\n");
-        // This prints the actual instruction being executed
         disassembleInstruction(vm.chunk, (int)(vm.ip - vm.chunk->code));
 #endif
 
-        uint8_t instruction;
-        switch (instruction = READ_BYTE()) {
+        uint32_t instruction = READ_INST();
+        switch (GET_OP(instruction)) {
+            
             case OP_CONSTANT: {
-                Value constant = READ_CONSTANT();
-                push(constant);
+                // Load constant into register A
+                REG(GET_A(instruction)) = READ_CONSTANT(instruction);
                 break;
             }
+
             case OP_ADD:      BINARY_OP(+); break;
             case OP_SUBTRACT: BINARY_OP(-); break;
             case OP_MULTIPLY: BINARY_OP(*); break;
             case OP_DIVIDE:   BINARY_OP(/); break;
-            case OP_NEGATE:   push(-pop()); break;
-            case OP_POP:      pop(); break;
-            
+
+            case OP_NEGATE: {
+                Value val = REG(GET_B(instruction));
+                if (!IS_NUMBER(val)) {
+                    runtimeError("Operand must be a number.");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                REG(GET_A(instruction)) = NUMBER_VAL(-AS_NUMBER(val));
+                break;
+            }
+
+            case OP_PRINT: {
+                printValue(REG(GET_A(instruction)));
+                printf("\n");
+                break;
+            }
+
             case OP_DEFINE_GLOBAL: {
-                uint8_t nameIndex = READ_BYTE(); 
-                Value value = pop();
-                (void)value;
-                printf("Defined global at index %d\n", nameIndex);
+                ObjString* name = AS_STRING(READ_CONSTANT(instruction));
+                tableSet(&vm.globals, name, REG(GET_A(instruction)));
+                break;
+            }
+
+            case OP_GET_GLOBAL: {
+                ObjString* name = AS_STRING(READ_CONSTANT(instruction));
+                Value value;
+                if (!tableGet(&vm.globals, name, &value)) {
+                    runtimeError("Undefined variable '%s'.", name->chars);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                REG(GET_A(instruction)) = value;
+                break;
+            }
+
+            case OP_SET_GLOBAL: {
+                ObjString* name = AS_STRING(READ_CONSTANT(instruction));
+                if (tableSet(&vm.globals, name, REG(GET_A(instruction)))) {
+                    tableDelete(&vm.globals, name); 
+                    runtimeError("Undefined variable '%s'.", name->chars);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
                 break;
             }
 
             case OP_RETURN: {
-                push(0.0); 
-                return INTERPRET_OK;
-            }
-
-            case OP_RETURN_VALUE: {
-                Value returnValue = pop();
-                push(returnValue); 
                 return INTERPRET_OK;
             }
         }
     }
 
-#undef READ_BYTE
+#undef READ_INST
 #undef READ_CONSTANT
+#undef REG
 #undef BINARY_OP
 }
 
-InterpretResult interpret(const char* source) {
+InterpretResult interpret(const char *source)
+{
     Chunk chunk;
     initChunk(&chunk);
 
-    if (!compile(source, &chunk)) {
+    if (!compile(source, &chunk))
+    {
         freeChunk(&chunk);
         return INTERPRET_COMPILE_ERROR;
     }
