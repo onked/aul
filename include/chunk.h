@@ -19,6 +19,8 @@ typedef enum {
     OP_NIL,     // Specifically load NIL into a register (faster than OP_CONSTANT)
     OP_TRUE,    // Load TRUE into a register
     OP_FALSE,   // Load FALSE into a register
+    OP_JUMP,          // Unconditional jump forward
+    OP_CALL,          // Call a function at a specific register with a certain number of arguments
     OP_RETURN,        // Exit the current function or script.
 } OpCode;
 

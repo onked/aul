@@ -5,33 +5,38 @@
 #include "value.h"
 #include "table.h"
 
-#define STACK_MAX 256
+#define FRAMES_MAX 64
+#define STACK_MAX (FRAMES_MAX * 250) // Enough space for all frames
 
 typedef struct {
-  Chunk* chunk;
-  uint32_t* ip;
-  
-  Value registers[STACK_MAX]; 
-  Value* stackTop; 
+    uint32_t* ip;           // The "Return Address" for this specific function
+    Value* slots;           // Pointer to the first register this frame can use in the VM stack
+} CallFrame;
 
-  Table globals;
+typedef struct {
+    Chunk* chunk;
+    
+    // The "Physical" memory for all registers across all functions
+    Value stack[STACK_MAX]; 
+    Value* stackTop; 
+
+    // The Call Stack
+    CallFrame frames[FRAMES_MAX];
+    int frameCount;
+
+    Table globals;
 } VM;
 
 typedef enum {
-  INTERPRET_OK,
-  INTERPRET_COMPILE_ERROR,
-  INTERPRET_RUNTIME_ERROR
+    INTERPRET_OK,
+    INTERPRET_COMPILE_ERROR,
+    INTERPRET_RUNTIME_ERROR
 } InterpretResult;
 
-// Making the VM instance globally accessible across the project
 extern VM vm; 
 
 void initVM();
 void freeVM();
 InterpretResult interpret(const char* source);
-
-// Stack helpers
-void push(Value value);
-Value pop();
 
 #endif

@@ -15,132 +15,233 @@ VM vm;
 
 static void resetStack()
 {
-    vm.stackTop = vm.registers;
+    vm.frameCount = 0;
+    // The stack pointer points to the base of our physical stack array
+    vm.stackTop = vm.stack;
 }
 
-// Helper for runtime errors (like adding a string to a number)
-static void runtimeError(const char *format, ...) {
+// Helper for runtime errors
+static void runtimeError(const char *format, ...)
+{
     va_list args;
     va_start(args, format);
     vfprintf(stderr, format, args);
     va_end(args);
     fputs("\n", stderr);
 
-    size_t instruction = vm.ip - vm.chunk->code - 1;
+    // Get IP from the current active frame
+    CallFrame *frame = &vm.frames[vm.frameCount - 1];
+    size_t instruction = frame->ip - vm.chunk->code - 1;
     int line = vm.chunk->lines[instruction];
     fprintf(stderr, "[line %d] in script\n", line);
-    
+
     resetStack();
 }
 
 void initVM()
 {
     resetStack();
-    // Initialize our global variable storage
     initTable(&vm.globals);
 }
 
 void freeVM()
 {
-    // Clean up globals when the VM shuts down
     freeTable(&vm.globals);
 }
 
-static InterpretResult run() {
+static InterpretResult run()
+{
     printf("VM STARTED\n");
 
-// Read the current 32-bit instruction and move to the next
-#define READ_INST() (*vm.ip++)
+// Access the top-most call frame
+#define FRAME (vm.frames[vm.frameCount - 1])
+
+// Read the current 32-bit instruction from the current frame's IP
+#define READ_INST() (*FRAME.ip++)
 
 // Helper to get a constant using the Bx index from the instruction
 #define READ_CONSTANT(inst) (vm.chunk->constants.values[GET_Bx(inst)])
 
-// Register access helper
-#define REG(index) (vm.registers[index])
+// REGISTER WINDOWING: REG(index) is relative to the current frame's stack slots
+#define REG(index) (FRAME.slots[index])
 
-#define BINARY_OP(op) \
-    do { \
-        uint32_t inst = vm.ip[-1]; \
-        Value b = REG(GET_C(inst)); \
-        Value a = REG(GET_B(inst)); \
-        if (!IS_NUMBER(a) || !IS_NUMBER(b)) { \
-            runtimeError("Operands must be numbers."); \
-            return INTERPRET_RUNTIME_ERROR; \
-        } \
+#define BINARY_OP(op)                                                \
+    do                                                               \
+    {                                                                \
+        uint32_t inst = FRAME.ip[-1];                                \
+        Value b = REG(GET_C(inst));                                  \
+        Value a = REG(GET_B(inst));                                  \
+        if (!IS_NUMBER(a) || !IS_NUMBER(b))                          \
+        {                                                            \
+            runtimeError("Operands must be numbers.");               \
+            return INTERPRET_RUNTIME_ERROR;                          \
+        }                                                            \
         REG(GET_A(inst)) = NUMBER_VAL(AS_NUMBER(a) op AS_NUMBER(b)); \
     } while (false)
 
-    for (;;) {
+    for (;;)
+    {
 #ifdef DEBUG_TRACE_EXECUTION
-        disassembleInstruction(vm.chunk, (int)(vm.ip - vm.chunk->code));
+        // Disassemble the next instruction based on the current frame's IP
+        disassembleInstruction(vm.chunk, (int)(FRAME.ip - vm.chunk->code));
 #endif
 
         uint32_t instruction = READ_INST();
-        switch (GET_OP(instruction)) {
-            
-            case OP_CONSTANT: {
-                // Load constant into register A
-                REG(GET_A(instruction)) = READ_CONSTANT(instruction);
-                break;
+        switch (GET_OP(instruction))
+        {
+
+        case OP_CONSTANT:
+        {
+            REG(GET_A(instruction)) = READ_CONSTANT(instruction);
+            break;
+        }
+
+        case OP_ADD:
+            BINARY_OP(+);
+            break;
+        case OP_SUBTRACT:
+            BINARY_OP(-);
+            break;
+        case OP_MULTIPLY:
+            BINARY_OP(*);
+            break;
+        case OP_DIVIDE:
+            BINARY_OP(/);
+            break;
+
+        case OP_NEGATE:
+        {
+            Value val = REG(GET_B(instruction));
+            if (!IS_NUMBER(val))
+            {
+                runtimeError("Operand must be a number.");
+                return INTERPRET_RUNTIME_ERROR;
             }
+            REG(GET_A(instruction)) = NUMBER_VAL(-AS_NUMBER(val));
+            break;
+        }
 
-            case OP_ADD:      BINARY_OP(+); break;
-            case OP_SUBTRACT: BINARY_OP(-); break;
-            case OP_MULTIPLY: BINARY_OP(*); break;
-            case OP_DIVIDE:   BINARY_OP(/); break;
+        case OP_PRINT:
+        {
+            printValue(REG(GET_A(instruction)));
+            printf("\n");
+            fflush(stdout);
+            break;
+        }
 
-            case OP_NEGATE: {
-                Value val = REG(GET_B(instruction));
-                if (!IS_NUMBER(val)) {
-                    runtimeError("Operand must be a number.");
-                    return INTERPRET_RUNTIME_ERROR;
-                }
-                REG(GET_A(instruction)) = NUMBER_VAL(-AS_NUMBER(val));
-                break;
+        case OP_DEFINE_GLOBAL:
+        {
+            ObjString *name = AS_STRING(READ_CONSTANT(instruction));
+            tableSet(&vm.globals, name, REG(GET_A(instruction)));
+            break;
+        }
+
+        case OP_GET_GLOBAL:
+        {
+            ObjString *name = AS_STRING(READ_CONSTANT(instruction));
+            Value value;
+            if (!tableGet(&vm.globals, name, &value))
+            {
+                runtimeError("Undefined variable '%s'.", name->chars);
+                return INTERPRET_RUNTIME_ERROR;
             }
+            REG(GET_A(instruction)) = value;
+            break;
+        }
 
-            case OP_PRINT: {
-                printValue(REG(GET_A(instruction)));
-                printf("\n");
-                break;
+        case OP_SET_GLOBAL:
+        {
+            ObjString *name = AS_STRING(READ_CONSTANT(instruction));
+            if (tableSet(&vm.globals, name, REG(GET_A(instruction))))
+            {
+                tableDelete(&vm.globals, name);
+                runtimeError("Undefined variable '%s'.", name->chars);
+                return INTERPRET_RUNTIME_ERROR;
             }
+            break;
+        }
 
-            case OP_DEFINE_GLOBAL: {
-                ObjString* name = AS_STRING(READ_CONSTANT(instruction));
-                tableSet(&vm.globals, name, REG(GET_A(instruction)));
-                break;
-            }
+        case OP_RETURN:
+        {
+            Value result = REG(GET_A(instruction)); 
+            vm.frameCount--;
 
-            case OP_GET_GLOBAL: {
-                ObjString* name = AS_STRING(READ_CONSTANT(instruction));
-                Value value;
-                if (!tableGet(&vm.globals, name, &value)) {
-                    runtimeError("Undefined variable '%s'.", name->chars);
-                    return INTERPRET_RUNTIME_ERROR;
-                }
-                REG(GET_A(instruction)) = value;
-                break;
-            }
-
-            case OP_SET_GLOBAL: {
-                ObjString* name = AS_STRING(READ_CONSTANT(instruction));
-                if (tableSet(&vm.globals, name, REG(GET_A(instruction)))) {
-                    tableDelete(&vm.globals, name); 
-                    runtimeError("Undefined variable '%s'.", name->chars);
-                    return INTERPRET_RUNTIME_ERROR;
-                }
-                break;
-            }
-
-            case OP_RETURN: {
+            if (vm.frameCount == 0)
+            {
                 return INTERPRET_OK;
             }
+
+            // Restore the stack top to the caller and pass the result
+            // The result goes into the register slot that previously held the function
+            vm.frames[vm.frameCount - 1].slots[0] = result; 
+            break;
+        }
+
+        case OP_MOVE:
+        {
+            uint8_t dest = GET_A(instruction);
+            uint8_t src = GET_B(instruction);
+            REG(dest) = REG(src);
+            break;
+        }
+
+        case OP_TRUE:
+        {
+            REG(GET_A(instruction)) = BOOL_VAL(true);
+            break;
+        }
+
+        case OP_FALSE:
+        {
+            REG(GET_A(instruction)) = BOOL_VAL(false);
+            break;
+        }
+
+        case OP_NIL:
+        {
+            REG(GET_A(instruction)) = NIL_VAL;
+            break;
+        }
+
+        case OP_JUMP:
+        {
+            uint16_t offset = GET_Bx(instruction);
+            FRAME.ip += offset;
+            break;
+        }
+
+        case OP_CALL:
+        {
+            int reg = GET_A(instruction);
+            Value funcAddr = REG(reg);
+
+            if (!IS_NUMBER(funcAddr))
+            {
+                runtimeError("Can only call functions (address expected).");
+                return INTERPRET_RUNTIME_ERROR;
+            }
+
+            if (vm.frameCount >= FRAMES_MAX)
+            {
+                runtimeError("Stack overflow.");
+                return INTERPRET_RUNTIME_ERROR;
+            }
+
+            Value* nextSlots = &REG(reg + 1);
+
+            CallFrame *nextFrame = &vm.frames[vm.frameCount++];
+            
+            nextFrame->slots = nextSlots;
+            nextFrame->ip = &vm.chunk->code[(int)AS_NUMBER(funcAddr)];
+            break;
+        }
         }
     }
 
 #undef READ_INST
 #undef READ_CONSTANT
 #undef REG
+#undef FRAME
 #undef BINARY_OP
 }
 
@@ -156,7 +257,11 @@ InterpretResult interpret(const char *source)
     }
 
     vm.chunk = &chunk;
-    vm.ip = vm.chunk->code;
+
+    // Push the initial 'main' frame
+    vm.frameCount = 1;
+    vm.frames[0].slots = vm.stack;
+    vm.frames[0].ip = vm.chunk->code;
 
     InterpretResult result = run();
 

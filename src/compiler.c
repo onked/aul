@@ -163,7 +163,10 @@ static int unary(bool canAssign) {
     (void)canAssign;
     TokenType operatorType = parser.previous.type;
     int argReg = parsePrecedence(PREC_UNARY);
-    int destReg = allocateRegister();
+    
+    // We can reuse the argument register for the result
+    int destReg = argReg; 
+    
     switch (operatorType) {
         case TOKEN_MINUS: emitABC(OP_NEGATE, destReg, argReg, 0); break;
         default: return 0;
@@ -174,15 +177,22 @@ static int unary(bool canAssign) {
 static int binary(int leftReg) {
     TokenType operatorType = parser.previous.type;
     ParseRule* rule = getRule(operatorType);
+    
     int rightReg = parsePrecedence((Precedence)(rule->precedence + 1));
-    int destReg = allocateRegister();
+    
+    // The result of the operation can go back into leftReg.
+    int destReg = leftReg; 
+    
     switch (operatorType) {
-        case TOKEN_PLUS:   emitABC(OP_ADD,      destReg, leftReg, rightReg); break;
+        case TOKEN_PLUS:   emitABC(OP_ADD,       destReg, leftReg, rightReg); break;
         case TOKEN_MINUS:  emitABC(OP_SUBTRACT, destReg, leftReg, rightReg); break;
         case TOKEN_STAR:   emitABC(OP_MULTIPLY, destReg, leftReg, rightReg); break;
         case TOKEN_SLASH:  emitABC(OP_DIVIDE,   destReg, leftReg, rightReg); break;
         default: return 0;
     }
+
+    nextFreeRegister--; 
+    
     return destReg;
 }
 
@@ -205,6 +215,7 @@ static int variable(bool canAssign) {
         if (canAssign && match(TOKEN_EQUAL)) {
             int valReg = expression();
             emitABC(OP_MOVE, reg, valReg, 0);
+            nextFreeRegister--;
         }
         return reg;
     } else {
@@ -251,6 +262,8 @@ static void addLocal(Token name, int reg) {
     local->name = name;
     local->depth = current.scopeDepth;
     local->reg = reg;
+    
+    nextFreeRegister = current.localCount;
 }
 
 static void globalDeclaration() {
@@ -261,11 +274,11 @@ static void globalDeclaration() {
         valReg = expression(); 
     } else {
         valReg = allocateRegister();
-        emitABx(OP_CONSTANT, valReg, makeConstant(NIL_VAL));
+        emitABC(OP_NIL, valReg, 0, 0);
     }
     emitABx(OP_DEFINE_GLOBAL, valReg, nameIndex);
     match(TOKEN_SEMICOLON);
-    nextFreeRegister = current.localCount; // Reset to end of locals
+    nextFreeRegister = current.localCount; 
 }
 
 static void localDeclaration() {
@@ -275,15 +288,19 @@ static void localDeclaration() {
         reg = expression(); 
     } else {
         reg = allocateRegister();
-        emitABx(OP_CONSTANT, reg, makeConstant(NIL_VAL));
+        emitABC(OP_NIL, reg, 0, 0);
     }
     addLocal(name, reg);
     match(TOKEN_SEMICOLON);
 }
 
 static void printStatement() {
+    consume(TOKEN_LEFT_PAREN, "Expect '(' after 'print'.");
     int reg = expression(); 
+    consume(TOKEN_RIGHT_PAREN, "Expect ')' after expression.");
+    
     emitABC(OP_PRINT, reg, 0, 0);
+    
     nextFreeRegister = current.localCount; 
 }
 
@@ -291,7 +308,7 @@ static void returnStatement() {
     int reg;
     if (match(TOKEN_SEMICOLON)) {
         reg = allocateRegister();
-        emitABx(OP_CONSTANT, reg, makeConstant(NIL_VAL));
+        emitABC(OP_NIL, reg, 0, 0);
     } else {
         reg = expression(); 
         match(TOKEN_SEMICOLON);
@@ -306,15 +323,109 @@ static void statement() {
     nextFreeRegister = current.localCount; 
 }
 
+static int emitJump(OpCode op) {
+    emitABx(op, 0, 0xFFFF); // Placeholder
+    return compilingChunk->count - 1;
+}
+
+static void patchJump(int jumpPlaceholderOffset) {
+    int jump = compilingChunk->count - jumpPlaceholderOffset - 1;
+    if (jump > 65535) {
+        errorAt(&parser.previous, "Too much code to jump over.");
+    }
+    uint32_t instruction = compilingChunk->code[jumpPlaceholderOffset];
+    OpCode op = GET_OP(instruction);
+    compilingChunk->code[jumpPlaceholderOffset] = CREATE_ABx(op, GET_A(instruction), jump);
+}
+
 static void function() {
     consume(TOKEN_IDENTIFIER, "Expect function name.");
+    Token name = parser.previous;
+
+    // Emit a jump that skips the body. 
+    int skipJump = emitJump(OP_JUMP); 
+
+    // Record the starting address (the next instruction)
+    int functionAddress = compilingChunk->count;
+
+    // Save state so we can restore it after compiling the function
+    int previousLocalCount = current.localCount;
+    int previousScopeDepth = current.scopeDepth;
+    int previousNextFree = nextFreeRegister;
+
+    current.localCount = 0;
+    current.scopeDepth = 1; // Start at 1 for parameters/body
+    nextFreeRegister = 0;
+
     consume(TOKEN_LEFT_PAREN, "Expect '(' after function name.");
+    
+    // Parameter Parsing
+    int arity = 0;
+    if (!check(TOKEN_RIGHT_PAREN)) {
+        do {
+            arity++;
+            if (arity > 250) {
+                errorAt(&parser.current, "Can't have more than 250 parameters.");
+            }
+            consume(TOKEN_IDENTIFIER, "Expect parameter name.");
+            // Parameters are the first locals in the function frame
+            addLocal(parser.previous, arity - 1); 
+        } while (match(TOKEN_COMMA));
+    }
+
     consume(TOKEN_RIGHT_PAREN, "Expect ')'.");
     consume(TOKEN_LEFT_BRACE, "Expect '{' before function body.");
-    while (parser.current.type != TOKEN_RIGHT_BRACE && parser.current.type != TOKEN_EOF) {
+    
+    while (!check(TOKEN_RIGHT_BRACE) && !check(TOKEN_EOF)) {
         declaration();
     }
+    
     consume(TOKEN_RIGHT_BRACE, "Expect '}' after function body.");
+    
+    // Function needs a return at the end (defaults to nil in Register 0)
+    emitABC(OP_RETURN, 0, 0, 0);
+
+    // Restore the compiler state
+    current.localCount = previousLocalCount;
+    current.scopeDepth = previousScopeDepth;
+    nextFreeRegister = previousNextFree;
+
+    // Patch the jump so it skips exactly to here
+    patchJump(skipJump);
+
+    // FIX: Load the address into a register first
+    int addrReg = allocateRegister();
+    emitABx(OP_CONSTANT, addrReg, makeConstant(NUMBER_VAL(functionAddress)));
+
+    // Store the function address in a Global
+    uint16_t nameIdx = makeConstant(OBJ_VAL(copyString(name.start, name.length)));
+    emitABx(OP_DEFINE_GLOBAL, addrReg, nameIdx); 
+
+    // Clean up temp register
+    nextFreeRegister = current.localCount;
+}
+
+static int call(int leftReg) {
+    int argCount = 0;
+    
+    // Parameters are evaluated into consecutive registers starting right after the function register
+    nextFreeRegister = leftReg + 1;
+
+    if (!check(TOKEN_RIGHT_PAREN)) {
+        do {
+            expression(); 
+            argCount++;
+        } while (match(TOKEN_COMMA));
+    }
+
+    consume(TOKEN_RIGHT_PAREN, "Expect ')' after function arguments.");
+    
+    // Use 'B' to store the number of arguments (arity)
+    emitABC(OP_CALL, leftReg, argCount, 0);
+    
+    // Reset nextFreeRegister to right after the call result
+    nextFreeRegister = leftReg + 1;
+    return leftReg;
 }
 
 static void synchronize() {
@@ -347,6 +458,7 @@ static void declaration() {
         function();
     } else if (match(TOKEN_PRINT)) {
         printStatement();
+        match(TOKEN_SEMICOLON);
     } else if (match(TOKEN_RETURN)) {
         returnStatement();
     } else {
@@ -355,8 +467,20 @@ static void declaration() {
     if (parser.panicMode) synchronize();
 }
 
+static int literal(bool canAssign) {
+    (void)canAssign;
+    int reg = allocateRegister();
+    switch (parser.previous.type) {
+        case TOKEN_FALSE: emitABC(OP_FALSE, reg, 0, 0); break;
+        case TOKEN_NIL:   emitABC(OP_NIL,   reg, 0, 0); break;
+        case TOKEN_TRUE:  emitABC(OP_TRUE,  reg, 0, 0); break;
+        default: return 0; // Unreachable
+    }
+    return reg; 
+}
+
 ParseRule rules[] = {
-    [TOKEN_LEFT_PAREN]    = {grouping, NULL,   PREC_NONE},
+    [TOKEN_LEFT_PAREN]    = {grouping, (int(*)(int))call, PREC_CALL},
     [TOKEN_RIGHT_PAREN]   = {NULL,     NULL,   PREC_NONE},
     [TOKEN_LEFT_BRACE]    = {NULL,     NULL,   PREC_NONE}, 
     [TOKEN_RIGHT_BRACE]   = {NULL,     NULL,   PREC_NONE},
@@ -380,18 +504,19 @@ ParseRule rules[] = {
     [TOKEN_NUMBER]        = {number,   NULL,   PREC_NONE},
     [TOKEN_AND]           = {NULL,     NULL,   PREC_NONE},
     [TOKEN_ELSE]          = {NULL,     NULL,   PREC_NONE},
-    [TOKEN_FALSE]         = {NULL,     NULL,   PREC_NONE},
     [TOKEN_FOR]           = {NULL,     NULL,   PREC_NONE},
     [TOKEN_FUNC]          = {NULL,     NULL,   PREC_NONE},
     [TOKEN_IF]            = {NULL,     NULL,   PREC_NONE},
     [TOKEN_OR]            = {NULL,     NULL,   PREC_NONE},
     [TOKEN_PRINT]         = {NULL,     NULL,   PREC_NONE},
     [TOKEN_RETURN]        = {NULL,     NULL,   PREC_NONE},
-    [TOKEN_TRUE]          = {NULL,     NULL,   PREC_NONE},
     [TOKEN_LOC]           = {NULL,     NULL,   PREC_NONE},
     [TOKEN_GLOBAL]        = {NULL,     NULL,   PREC_NONE},
     [TOKEN_WHILE]         = {NULL,     NULL,   PREC_NONE},
     [TOKEN_ERROR]         = {NULL,     NULL,   PREC_NONE},
+    [TOKEN_FALSE]         = {literal,  NULL,   PREC_NONE},
+    [TOKEN_NIL]           = {literal,  NULL,   PREC_NONE},
+    [TOKEN_TRUE]          = {literal,  NULL,   PREC_NONE},
     [TOKEN_EOF]           = {NULL,     NULL,   PREC_NONE},
 };
 
@@ -411,7 +536,7 @@ bool compile(const char* source, Chunk* chunk) {
         declaration();
     }
     int r = allocateRegister();
-    emitABx(OP_CONSTANT, r, makeConstant(NIL_VAL));
+    emitABC(OP_NIL, r, 0, 0);
     emitABC(OP_RETURN, r, 0, 0);
     return !parser.hadError;
 }

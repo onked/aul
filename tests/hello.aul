@@ -1,5 +1,10 @@
-func main() {
-    loc broj = 15
-    print broj
+glo didRun = false
+
+func hello(name) {
+    print("Hi")
+    print(name)
+    didRun = true
 }
-print 36
+
+hello("Denis")
+print(didRun)
