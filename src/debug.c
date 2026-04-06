@@ -68,9 +68,8 @@ int disassembleInstruction(Chunk *chunk, int offset)
         return abxInstruction("OP_SET_GLOBAL", chunk, instruction, offset);
 
     case OP_MOVE:
-        // Move uses A (dest) and B (source)
-        printf("%-16s %4d %4d\n", "OP_MOVE", GET_A(instruction), GET_B(instruction));
-        return offset + 1;
+        // Move typically uses A (dest) and B (source)
+        return abcInstruction("OP_MOVE", instruction, offset);
 
     case OP_PRINT:
         return simpleRegister("OP_PRINT", instruction, offset);
@@ -91,19 +90,26 @@ int disassembleInstruction(Chunk *chunk, int offset)
     case OP_DIVIDE:
         return abcInstruction("OP_DIVIDE", instruction, offset);
     case OP_NEGATE:
-        printf("%-16s %4d %4d\n", "OP_NEGATE", GET_A(instruction), GET_B(instruction));
-        return offset + 1;
+        return abcInstruction("OP_NEGATE", instruction, offset);
+
+    case OP_GET_UPVALUE:
+        // A is the destination register, B is the upvalue index
+        return abcInstruction("OP_GET_UPVALUE", instruction, offset);
+    case OP_SET_UPVALUE:
+        // A is the upvalue index, B is the source register
+        return abcInstruction("OP_SET_UPVALUE", instruction, offset);
 
     case OP_RETURN:
         return simpleRegister("OP_RETURN", instruction, offset);
 
     case OP_JUMP:
-        uint16_t jumpOffset = GET_Bx(instruction); // Rename this variable
+        uint16_t jumpOffset = GET_Bx(instruction); 
         printf("%-16s %4d\n", "OP_JUMP", jumpOffset);
-        return offset + 1; // Return the original parameter 'offset'
+        return offset + 1; 
 
     case OP_CALL:
-        return simpleRegister("OP_CALL", instruction, offset);
+        // A is the function register, B is the arg count
+        return abcInstruction("OP_CALL", instruction, offset);
 
     default:
         printf("Unknown opcode %d\n", op);

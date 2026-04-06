@@ -34,9 +34,24 @@ void printValue(Value value) {
         case VAL_NIL:    printf("nil"); break;
         case VAL_NUMBER: printf("%g", AS_NUMBER(value)); break;
         case VAL_OBJ: {
-            // This is how we'll print strings once we wire up object.c
+            // Handle different heap objects
             if (IS_STRING(value)) {
                 printf("%s", AS_CSTRING(value));
+            } else if (IS_FUNCTION(value)) {
+                ObjFunction* function = AS_FUNCTION(value);
+                if (function->name == NULL) {
+                    printf("<script>");
+                } else {
+                    printf("<fn %s>", function->name->chars);
+                }
+            } else if (IS_CLOSURE(value)) {
+                // For now, just treat closures like functions for printing
+                ObjFunction* function = AS_CLOSURE(value)->function;
+                if (function->name == NULL) {
+                    printf("<script>");
+                } else {
+                    printf("<fn %s>", function->name->chars);
+                }
             }
             break;
         }

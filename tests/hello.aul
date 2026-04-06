@@ -1,10 +1,20 @@
-glo didRun = false
+func makeCounter() {
+    loc count = 10;
 
-func hello(name) {
-    print("Hi")
-    print(name)
-    didRun = true
+    func increment() {
+        count = count + 1;
+        return count;
+    }
+
+    return increment;
 }
 
-hello("Denis")
-print(didRun)
+loc myCounter = makeCounter();
+
+print(myCounter()); -- Should print 11
+print(myCounter()); -- Should print 12
+print(myCounter()); -- Should print 13
+
+loc anotherCounter = makeCounter();
+print(anotherCounter()); -- Should print 101
+print(myCounter());      -- Should still be 14 (they shouldn't leak into each other)

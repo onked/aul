@@ -5,20 +5,51 @@
 #include "object.h"
 #include "value.h"
 #include "vm.h"
+#include "chunk.h"
 
 // Helper to allocate memory for any object type
 static Obj* allocateObject(size_t size, ObjType type) {
     Obj* object = (Obj*)malloc(size);
     object->type = type;
 
-    // Optional: Link this into a list of all objects for the Garbage Collector
-    // object->next = vm.objects;
-    // vm.objects = object;
+    object->next = vm.objects;
+    vm.objects = object;
 
     return object;
 }
 
-// The FNV-1a Hashing Algorithm
+ObjFunction* newFunction() {
+    ObjFunction* function = (ObjFunction*)allocateObject(sizeof(ObjFunction), OBJ_FUNCTION);
+    function->arity = 0;
+    function->upvalueCount = 0;
+    function->name = NULL;
+    initChunk(&function->chunk);
+    return function;
+}
+
+ObjClosure* newClosure(ObjFunction* function) {
+    // Allocate the upvalue pointer array
+    ObjUpvalue** upvalues = (ObjUpvalue**)malloc(sizeof(ObjUpvalue*) * function->upvalueCount);
+    for (int i = 0; i < function->upvalueCount; i++) {
+        upvalues[i] = NULL;
+    }
+
+    ObjClosure* closure = (ObjClosure*)allocateObject(sizeof(ObjClosure), OBJ_CLOSURE);
+    closure->function = function;
+    closure->upvalues = upvalues;
+    closure->upvalueCount = function->upvalueCount;
+    return closure;
+}
+
+ObjUpvalue* newUpvalue(Value* slot) {
+    ObjUpvalue* upvalue = (ObjUpvalue*)allocateObject(sizeof(ObjUpvalue), OBJ_UPVALUE);
+    upvalue->location = slot;
+    upvalue->closed = NIL_VAL;
+    upvalue->next = NULL;
+    return upvalue;
+}
+
+// FNV-1a Hashing Algorithm
 static uint32_t hashString(const char* key, int length) {
     uint32_t hash = 2166136261u;
     for (int i = 0; i < length; i++) {
@@ -37,13 +68,13 @@ static ObjString* allocateString(char* chars, int length, uint32_t hash) {
     return string;
 }
 
-// Use this when you want to "take ownership" of an existing C string
+// Use this when you want to take ownership of an existing C string
 ObjString* takeString(char* chars, int length) {
     uint32_t hash = hashString(chars, length);
     return allocateString(chars, length, hash);
 }
 
-// Use this to copy a string (e.g., from the source code)
+// Use this to copy a string
 ObjString* copyString(const char* chars, int length) {
     uint32_t hash = hashString(chars, length);
     

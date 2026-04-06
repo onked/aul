@@ -1,9 +1,9 @@
 #ifndef aul_compiler_h
 #define aul_compiler_h
 
-#include "chunk.h"
+#include "object.h"
+#include "vm.h"
 
-// Returns true if compilation succeeded
-bool compile(const char* source, Chunk* chunk);
+ObjFunction* compile(const char* source);
 
 #endif

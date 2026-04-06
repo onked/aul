@@ -16,11 +16,12 @@ VM vm;
 static void resetStack()
 {
     vm.frameCount = 0;
-    // The stack pointer points to the base of our physical stack array
+    // Base of the physical stack array
     vm.stackTop = vm.stack;
+    vm.openUpvalues = NULL;
 }
 
-// Helper for runtime errors
+// Spits out errors when the code does something stupid at runtime
 static void runtimeError(const char *format, ...)
 {
     va_list args;
@@ -29,10 +30,10 @@ static void runtimeError(const char *format, ...)
     va_end(args);
     fputs("\n", stderr);
 
-    // Get IP from the current active frame
+    // Grab the IP from whichever frame was running when it blew up
     CallFrame *frame = &vm.frames[vm.frameCount - 1];
-    size_t instruction = frame->ip - vm.chunk->code - 1;
-    int line = vm.chunk->lines[instruction];
+    size_t instruction = frame->ip - frame->closure->function->chunk.code - 1;
+    int line = frame->closure->function->chunk.lines[instruction];
     fprintf(stderr, "[line %d] in script\n", line);
 
     resetStack();
@@ -41,28 +42,35 @@ static void runtimeError(const char *format, ...)
 void initVM()
 {
     resetStack();
+    vm.objects = NULL;
     initTable(&vm.globals);
 }
 
 void freeVM()
 {
     freeTable(&vm.globals);
+    // Remember to add freeObjects() here later so we don't leak memory
+}
+
+static ObjUpvalue* captureUpvalue(Value* local) {
+    ObjUpvalue* createdUpvalue = newUpvalue(local);
+    return createdUpvalue;
 }
 
 static InterpretResult run()
 {
     printf("VM STARTED\n");
 
-// Access the top-most call frame
+// Just a shortcut to the frame at the top of the call stack
 #define FRAME (vm.frames[vm.frameCount - 1])
 
-// Read the current 32-bit instruction from the current frame's IP
+// Grabs the next 32-bit instruction and bumps the instruction pointer
 #define READ_INST() (*FRAME.ip++)
 
-// Helper to get a constant using the Bx index from the instruction
-#define READ_CONSTANT(inst) (vm.chunk->constants.values[GET_Bx(inst)])
+// Pulls a constant from the chunk using the Bx index
+#define READ_CONSTANT(inst) (FRAME.closure->function->chunk.constants.values[GET_Bx(inst)])
 
-// REGISTER WINDOWING: REG(index) is relative to the current frame's stack slots
+// Register windowing: treats the stack like a set of registers for the current frame
 #define REG(index) (FRAME.slots[index])
 
 #define BINARY_OP(op)                                                \
@@ -82,32 +90,42 @@ static InterpretResult run()
     for (;;)
     {
 #ifdef DEBUG_TRACE_EXECUTION
-        // Disassemble the next instruction based on the current frame's IP
-        disassembleInstruction(vm.chunk, (int)(FRAME.ip - vm.chunk->code));
+        // Show us what the VM is about to do
+        disassembleInstruction(&FRAME.closure->function->chunk, (int)(FRAME.ip - FRAME.closure->function->chunk.code));
 #endif
 
         uint32_t instruction = READ_INST();
         switch (GET_OP(instruction))
         {
 
-        case OP_CONSTANT:
+       case OP_CONSTANT:
         {
-            REG(GET_A(instruction)) = READ_CONSTANT(instruction);
+            Value constant = READ_CONSTANT(instruction);
+            if (IS_FUNCTION(constant)) {
+                ObjFunction* function = AS_FUNCTION(constant);
+                ObjClosure* closure = newClosure(function);
+                REG(GET_A(instruction)) = OBJ_VAL(closure);
+
+                for (int i = 0; i < function->upvalueCount; i++) {
+                    uint8_t index = function->upvalues[i].index;
+                    if (function->upvalues[i].isLocal) {
+                        // Capture the local variable from the current frame's register bank
+                        closure->upvalues[i] = captureUpvalue(&REG(index));
+                    } else {
+                        // Pass through an existing upvalue
+                        closure->upvalues[i] = FRAME.closure->upvalues[index];
+                    }
+                }
+            } else {
+                REG(GET_A(instruction)) = constant;
+            }
             break;
         }
 
-        case OP_ADD:
-            BINARY_OP(+);
-            break;
-        case OP_SUBTRACT:
-            BINARY_OP(-);
-            break;
-        case OP_MULTIPLY:
-            BINARY_OP(*);
-            break;
-        case OP_DIVIDE:
-            BINARY_OP(/);
-            break;
+        case OP_ADD:      BINARY_OP(+); break;
+        case OP_SUBTRACT: BINARY_OP(-); break;
+        case OP_MULTIPLY: BINARY_OP(*); break;
+        case OP_DIVIDE:   BINARY_OP(/); break;
 
         case OP_NEGATE:
         {
@@ -154,6 +172,7 @@ static InterpretResult run()
             ObjString *name = AS_STRING(READ_CONSTANT(instruction));
             if (tableSet(&vm.globals, name, REG(GET_A(instruction))))
             {
+                // Delete if it wasn't actually there (keeps us from creating new globals with SET)
                 tableDelete(&vm.globals, name);
                 runtimeError("Undefined variable '%s'.", name->chars);
                 return INTERPRET_RUNTIME_ERROR;
@@ -161,19 +180,36 @@ static InterpretResult run()
             break;
         }
 
+        case OP_GET_UPVALUE:
+        {
+            uint8_t reg = READ_INST();
+            uint8_t slot = READ_INST();
+            // It's pulling from the closure's upvalue array
+            REG(reg) = *vm.frames[vm.frameCount - 1].closure->upvalues[slot]->location;
+            break;
+        }
+
+        case OP_SET_UPVALUE:
+        {
+            int slot = GET_A(instruction);
+            *FRAME.closure->upvalues[slot]->location = REG(GET_B(instruction));
+            break;
+        }
+
         case OP_RETURN:
         {
-            Value result = REG(GET_A(instruction)); 
-            vm.frameCount--;
+            Value result = REG(GET_A(instruction));
 
+            // Put the result in Slot 0 of the CURRENT frame.
+            // Because of our sliding stack window, this perfectly overwrites
+            // the function in the caller's register with the return value!
+            FRAME.slots[0] = result;
+
+            vm.frameCount--;
             if (vm.frameCount == 0)
             {
                 return INTERPRET_OK;
             }
-
-            // Restore the stack top to the caller and pass the result
-            // The result goes into the register slot that previously held the function
-            vm.frames[vm.frameCount - 1].slots[0] = result; 
             break;
         }
 
@@ -210,29 +246,46 @@ static InterpretResult run()
             break;
         }
 
-        case OP_CALL:
+       case OP_CALL:
         {
             int reg = GET_A(instruction);
-            Value funcAddr = REG(reg);
+            int argCount = GET_B(instruction);
+            Value callee = REG(reg);
+            ObjClosure* closure = NULL;
 
-            if (!IS_NUMBER(funcAddr))
-            {
-                runtimeError("Can only call functions (address expected).");
+            if (IS_CLOSURE(callee)) {
+                closure = AS_CLOSURE(callee);
+            } else if (IS_FUNCTION(callee)) {
+                ObjFunction* function = AS_FUNCTION(callee);
+                closure = newClosure(function);
+                REG(reg) = OBJ_VAL(closure); 
+
+                for (int i = 0; i < function->upvalueCount; i++) {
+                    closure->upvalues[i] = NULL; 
+                }
+            } else {
+                runtimeError("Can only call functions.");
                 return INTERPRET_RUNTIME_ERROR;
             }
 
-            if (vm.frameCount >= FRAMES_MAX)
-            {
+            if (argCount != closure->function->arity) {
+                runtimeError("Expected %d arguments but got %d.", 
+                             closure->function->arity, argCount);
+                return INTERPRET_RUNTIME_ERROR;
+            }
+
+            if (vm.frameCount >= FRAMES_MAX) {
                 runtimeError("Stack overflow.");
                 return INTERPRET_RUNTIME_ERROR;
             }
 
-            Value* nextSlots = &REG(reg + 1);
-
-            CallFrame *nextFrame = &vm.frames[vm.frameCount++];
+            CallFrame *nextFrame = &vm.frames[vm.frameCount];
+            nextFrame->closure = closure;
+            nextFrame->ip = closure->function->chunk.code;
             
-            nextFrame->slots = nextSlots;
-            nextFrame->ip = &vm.chunk->code[(int)AS_NUMBER(funcAddr)];
+            nextFrame->slots = &REG(reg);
+            
+            vm.frameCount++;
             break;
         }
         }
@@ -247,24 +300,17 @@ static InterpretResult run()
 
 InterpretResult interpret(const char *source)
 {
-    Chunk chunk;
-    initChunk(&chunk);
+    ObjFunction* function = compile(source);
+    if (function == NULL) return INTERPRET_COMPILE_ERROR;
 
-    if (!compile(source, &chunk))
-    {
-        freeChunk(&chunk);
-        return INTERPRET_COMPILE_ERROR;
-    }
-
-    vm.chunk = &chunk;
-
-    // Push the initial 'main' frame
+    // Wrap the top-level script function in a closure
+    ObjClosure* closure = newClosure(function);
+    
+    // Kick off the first frame
     vm.frameCount = 1;
+    vm.frames[0].closure = closure;
     vm.frames[0].slots = vm.stack;
-    vm.frames[0].ip = vm.chunk->code;
+    vm.frames[0].ip = closure->function->chunk.code;
 
-    InterpretResult result = run();
-
-    freeChunk(&chunk);
-    return result;
+    return run();
 }

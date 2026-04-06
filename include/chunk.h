@@ -9,6 +9,8 @@ typedef enum {
     OP_DEFINE_GLOBAL, // Create a new global variable using a name from constants and a value from a register.
     OP_GET_GLOBAL,    // Look up a global variable by name and copy its value into a register slot.
     OP_SET_GLOBAL,    // Update an existing global variable with a value from a register slot.
+    OP_GET_UPVALUE,   // Load a variable captured by a closure into a register slot.
+    OP_SET_UPVALUE,   // Update a variable captured by a closure with a value from
     OP_PRINT,         // Print the value currently stored in a specific register slot.
     OP_ADD,           // Add values from two registers and store the result in a third register.
     OP_SUBTRACT,      // Subtract one register from another and store the result in a third register.

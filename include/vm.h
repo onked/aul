@@ -4,16 +4,21 @@
 #include "chunk.h"
 #include "value.h"
 #include "table.h"
+#include "object.h"
 
 #define FRAMES_MAX 64
 #define STACK_MAX (FRAMES_MAX * 250) // Enough space for all frames
 
 typedef struct {
+    ObjClosure* closure;    // The closure containing the function and upvalues
     uint32_t* ip;           // The "Return Address" for this specific function
     Value* slots;           // Pointer to the first register this frame can use in the VM stack
 } CallFrame;
 
 typedef struct {
+    struct Obj* objects;    // Linked list of all allocated objects for the GC
+    struct ObjUpvalue* openUpvalues; // List of upvalues pointing to the stack
+
     Chunk* chunk;
     
     // The "Physical" memory for all registers across all functions
