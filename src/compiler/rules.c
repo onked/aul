@@ -3,32 +3,36 @@
 ParseRule rules[] = {
     [TOKEN_LEFT_PAREN]    = {grouping, (int(*)(int))call, PREC_CALL},
     [TOKEN_RIGHT_PAREN]   = {NULL,     NULL,    PREC_NONE},
-    [TOKEN_LEFT_BRACE]    = {NULL,     NULL,    PREC_NONE}, 
+    [TOKEN_LEFT_BRACE]    = {tableLiteral, NULL,    PREC_NONE},
     [TOKEN_RIGHT_BRACE]   = {NULL,     NULL,    PREC_NONE},
+    [TOKEN_LEFT_BRACKET]  = {NULL,     (int(*)(int))subscript, PREC_CALL},
+    [TOKEN_RIGHT_BRACKET] = {NULL,     NULL,    PREC_NONE},
     [TOKEN_COMMA]         = {NULL,     NULL,    PREC_NONE},
     [TOKEN_DOT]           = {NULL,     NULL,    PREC_NONE},
+    [TOKEN_COLON]         = {NULL,     NULL,    PREC_NONE},
     [TOKEN_MINUS]         = {unary,    (int(*)(int))binary, PREC_TERM},
     [TOKEN_PLUS]          = {NULL,     (int(*)(int))binary, PREC_TERM},
     [TOKEN_SEMICOLON]     = {NULL,     NULL,    PREC_NONE},
     [TOKEN_SLASH]         = {NULL,     (int(*)(int))binary, PREC_FACTOR},
     [TOKEN_STAR]          = {NULL,     (int(*)(int))binary, PREC_FACTOR},
-    [TOKEN_BANG]          = {NULL,     NULL,    PREC_NONE},
-    [TOKEN_BANG_EQUAL]    = {NULL,     NULL,    PREC_NONE},
+    [TOKEN_BANG]          = {unary,    NULL,    PREC_NONE},
+    [TOKEN_HASH]          = {unary,    NULL,    PREC_NONE},
+    [TOKEN_BANG_EQUAL]    = {NULL,     (int(*)(int))binary,    PREC_EQUALITY},
     [TOKEN_EQUAL]         = {NULL,     NULL,    PREC_NONE},
-    [TOKEN_EQUAL_EQUAL]   = {NULL,     NULL,    PREC_NONE},
-    [TOKEN_GREATER]       = {NULL,     NULL,    PREC_NONE},
-    [TOKEN_GREATER_EQUAL] = {NULL,     NULL,    PREC_NONE},
-    [TOKEN_LESS]          = {NULL,     NULL,    PREC_NONE},
-    [TOKEN_LESS_EQUAL]    = {NULL,     NULL,    PREC_NONE},
+    [TOKEN_EQUAL_EQUAL]   = {NULL,     (int(*)(int))binary,    PREC_EQUALITY},
+    [TOKEN_GREATER]       = {NULL,     (int(*)(int))binary,    PREC_COMPARISON},
+    [TOKEN_GREATER_EQUAL] = {NULL,     (int(*)(int))binary,    PREC_COMPARISON},
+    [TOKEN_LESS]          = {NULL,     (int(*)(int))binary,    PREC_COMPARISON},
+    [TOKEN_LESS_EQUAL]    = {NULL,     (int(*)(int))binary,    PREC_COMPARISON},
     [TOKEN_IDENTIFIER]    = {variable, NULL,    PREC_NONE},
     [TOKEN_STRING]        = {string,   NULL,    PREC_NONE},
     [TOKEN_NUMBER]        = {number,   NULL,    PREC_NONE},
-    [TOKEN_AND]           = {NULL,     NULL,    PREC_NONE},
+    [TOKEN_AND]           = {NULL,     (int(*)(int))and_,    PREC_AND},
+    [TOKEN_OR]            = {NULL,     (int(*)(int))or_,     PREC_OR},
     [TOKEN_ELSE]          = {NULL,     NULL,    PREC_NONE},
     [TOKEN_FOR]           = {NULL,     NULL,    PREC_NONE},
-    [TOKEN_FUNC]          = {NULL,     NULL,    PREC_NONE},
+    [TOKEN_FUNC]          = {functionExpr, NULL,    PREC_NONE},
     [TOKEN_IF]            = {NULL,     NULL,    PREC_NONE},
-    [TOKEN_OR]            = {NULL,     NULL,    PREC_NONE},
     [TOKEN_PRINT]         = {NULL,     NULL,    PREC_NONE},
     [TOKEN_RETURN]        = {NULL,     NULL,    PREC_NONE},
     [TOKEN_LOC]           = {NULL,     NULL,    PREC_NONE},
@@ -41,11 +45,6 @@ ParseRule rules[] = {
     [TOKEN_EOF]           = {NULL,     NULL,    PREC_NONE},
 };
 
-/**
- * Returns the rule for a given token type.
- * This is used by the expression parser to determine 
- * how to handle tokens in infix/prefix positions.
- */
 ParseRule* getRule(TokenType type) {
     return &rules[type];
 }

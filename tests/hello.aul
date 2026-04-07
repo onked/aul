@@ -18,3 +18,13 @@ print(myCounter()); -- Should print 13
 loc anotherCounter = makeCounter();
 print(anotherCounter()); -- Should print 101
 print(myCounter());      -- Should still be 14 (they shouldn't leak into each other)
+
+func clobberStack() {
+    loc a = 999;
+    loc b = 999;
+    loc c = 999;
+}
+
+print(myCounter()); -- Prints 11
+clobberStack();     -- This will overwrite the memory myCounter is pointing to
+print(myCounter()); -- This will likely print 1000 or crash!

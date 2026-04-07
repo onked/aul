@@ -18,7 +18,6 @@ void freeTable(Table* table) {
     initTable(table);
 }
 
-// Core search logic
 static Entry* findEntry(Entry* entries, int capacity, ObjString* key) {
     uint32_t index = key->hash % capacity;
     Entry* tombstone = NULL;
@@ -32,7 +31,6 @@ static Entry* findEntry(Entry* entries, int capacity, ObjString* key) {
                 if (tombstone == NULL) tombstone = entry;
             }
         } 
-        // CHANGE THIS PART:
         else if (entry->key->hash == key->hash && 
                  entry->key->length == key->length &&
                  memcmp(entry->key->chars, key->chars, key->length) == 0) {
@@ -43,7 +41,6 @@ static Entry* findEntry(Entry* entries, int capacity, ObjString* key) {
     }
 }
 
-// Resizes the table when it gets too full
 static void adjustCapacity(Table* table, int capacity) {
     Entry* entries = malloc(sizeof(Entry) * capacity);
     for (int i = 0; i < capacity; i++) {
@@ -51,7 +48,6 @@ static void adjustCapacity(Table* table, int capacity) {
         entries[i].value = NIL_VAL;
     }
 
-    // Re-insert every existing item into the new, larger array
     table->count = 0;
     for (int i = 0; i < table->capacity; i++) {
         Entry* entry = &table->entries[i];
@@ -96,12 +92,10 @@ bool tableGet(Table* table, ObjString* key, Value* value) {
 bool tableDelete(Table* table, ObjString* key) {
     if (table->count == 0) return false;
 
-    // Find the entry
     Entry* entry = findEntry(table->entries, table->capacity, key);
     if (entry->key == NULL) return false;
 
-    // Place a tombstone so we don't break the probe chain
     entry->key = NULL;
-    entry->value = BOOL_VAL(true); // Any non-nil value works as a tombstone
+    entry->value = BOOL_VAL(true);
     return true;
 }

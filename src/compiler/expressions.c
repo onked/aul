@@ -3,7 +3,6 @@
 
 #include "compiler_shared.h"
 
-// Forward declaration so we can use it in variable()
 static int resolveLocal(Token* name);
 
 int parsePrecedence(Precedence precedence) {
@@ -17,7 +16,6 @@ int parsePrecedence(Precedence precedence) {
     bool canAssign = precedence <= PREC_ASSIGNMENT;
     int leftReg = prefixRule(canAssign);
 
-    // Keep eating tokens as long as they have higher priority than the current op
     while (precedence <= getRule(parser.current.type)->precedence) {
         advance();
         int (*infixRule)(int) = (int (*)(int))getRule(parser.previous.type)->infix;
@@ -37,14 +35,12 @@ int number(bool canAssign) {
     (void)canAssign;
     double value = strtod(parser.previous.start, NULL);
     int reg = allocateRegister();
-    // Shove the number into the constant pool and emit the instruction
     emitABx(OP_CONSTANT, reg, makeConstant(NUMBER_VAL(value)));
     return reg;
 }
 
 int string(bool canAssign) {
     (void)canAssign;
-    // Strip the quotes and copy the string data
     Value value = OBJ_VAL(copyString(parser.previous.start + 1, parser.previous.length - 2));
     int reg = allocateRegister();
     emitABx(OP_CONSTANT, reg, makeConstant(value));
@@ -74,11 +70,17 @@ int unary(bool canAssign) {
     (void)canAssign;
     TokenType operatorType = parser.previous.type;
     int argReg = parsePrecedence(PREC_UNARY);
-    
-    int destReg = argReg; // Just reuse the register we already have
+    int destReg = argReg;
     
     switch (operatorType) {
         case TOKEN_MINUS: emitABC(OP_NEGATE, destReg, argReg, 0); break;
+        case TOKEN_BANG:
+            emitABC(OP_NOT, destReg, argReg, 0);
+            break;
+        case TOKEN_HASH:
+            destReg = allocateRegister();
+            emitABC(OP_LENGTH, destReg, argReg, 0);
+            break;
         default: return 0;
     }
     return destReg;
@@ -87,69 +89,198 @@ int unary(bool canAssign) {
 int binary(int leftReg) {
     TokenType operatorType = parser.previous.type;
     ParseRule* rule = getRule(operatorType);
-    // Parse the right side with slightly higher precedence to handle nesting
     int rightReg = parsePrecedence((Precedence)(rule->precedence + 1));
     
-    int destReg = leftReg; 
+    int destReg;
     
     switch (operatorType) {
-        case TOKEN_PLUS:   emitABC(OP_ADD,      destReg, leftReg, rightReg); break;
-        case TOKEN_MINUS:  emitABC(OP_SUBTRACT, destReg, leftReg, rightReg); break;
-        case TOKEN_STAR:   emitABC(OP_MULTIPLY, destReg, leftReg, rightReg); break;
-        case TOKEN_SLASH:  emitABC(OP_DIVIDE,   destReg, leftReg, rightReg); break;
+        case TOKEN_PLUS:          destReg = leftReg; emitABC(OP_ADD,      destReg, leftReg, rightReg); break;
+        case TOKEN_MINUS:         destReg = leftReg; emitABC(OP_SUBTRACT, destReg, leftReg, rightReg); break;
+        case TOKEN_STAR:          destReg = leftReg; emitABC(OP_MULTIPLY, destReg, leftReg, rightReg); break;
+        case TOKEN_SLASH:         destReg = leftReg; emitABC(OP_DIVIDE,   destReg, leftReg, rightReg); break;
+        case TOKEN_EQUAL_EQUAL:   destReg = allocateRegister(); emitABC(OP_EQUAL,         destReg, leftReg, rightReg); break;
+        case TOKEN_BANG_EQUAL:    destReg = allocateRegister(); emitABC(OP_EQUAL, destReg, leftReg, rightReg); emitABC(OP_NOT, destReg, destReg, 0); break;
+        case TOKEN_GREATER:       destReg = allocateRegister(); emitABC(OP_GREATER,       destReg, leftReg, rightReg); break;
+        case TOKEN_LESS:          destReg = allocateRegister(); emitABC(OP_LESS,          destReg, leftReg, rightReg); break;
+        case TOKEN_GREATER_EQUAL: destReg = allocateRegister(); emitABC(OP_GREATER_EQUAL, destReg, leftReg, rightReg); break;
+        case TOKEN_LESS_EQUAL:    destReg = allocateRegister(); emitABC(OP_LESS_EQUAL,    destReg, leftReg, rightReg); break;
         default: return 0;
     }
 
-    // Done with the right-side temp register, so free it up
-    nextFreeRegister--; 
+    nextFreeRegister--;
     return destReg;
 }
 
 int variable(bool canAssign) {
     Token name = parser.previous;
+    
+    // builtins
+    if (name.length == 12 && memcmp(name.start, "setmetatable", 12) == 0) {
+        consume(TOKEN_LEFT_PAREN, "Expect '(' after 'setmetatable'.");
+        int tableReg = expression();
+        consume(TOKEN_COMMA, "Expect ',' after table.");
+        int mtReg = expression();
+        consume(TOKEN_RIGHT_PAREN, "Expect ')' after metatable.");
+        emitABC(OP_SET_METATABLE, tableReg, mtReg, 0);
+        return tableReg;
+    }
+    if (name.length == 12 && memcmp(name.start, "getmetatable", 12) == 0) {
+        consume(TOKEN_LEFT_PAREN, "Expect '(' after 'getmetatable'.");
+        int tableReg = expression();
+        consume(TOKEN_RIGHT_PAREN, "Expect ')' after table.");
+        int destReg = allocateRegister();
+        emitABC(OP_GET_METATABLE, destReg, tableReg, 0);
+        return destReg;
+    }
+    
     int arg;
     OpCode getOp, setOp;
 
-    // First: Is it a local variable in the current function?
     arg = resolveLocal(&name);
     if (arg != -1) {
-        getOp = OP_MOVE; 
+        getOp = OP_MOVE;
         setOp = OP_MOVE;
-    } 
-    // Second: Check if it belongs to an outer function (an upvalue)
-    else if ((arg = resolveUpvalue(current, &name)) != -1) {
+    } else if ((arg = resolveUpvalue(current, &name)) != -1) {
         getOp = OP_GET_UPVALUE;
         setOp = OP_SET_UPVALUE;
-    } 
-    // Third: If we can't find it anywhere else, it's gotta be a global
-    else {
+    } else {
         arg = makeConstant(OBJ_VAL(copyString(name.start, name.length)));
         getOp = OP_GET_GLOBAL;
         setOp = OP_SET_GLOBAL;
     }
 
-    // Handle assignments like 'x = 10'
-    if (canAssign && match(TOKEN_EQUAL)) {
-        int valReg = expression();
-        if (getOp == OP_MOVE) {
-            emitABC(OP_MOVE, arg, valReg, 0);
-        } else {
-            // For upvalues/globals, A is the index and B is where the value lives
-            emitABC(setOp, arg, valReg, 0); 
+    if (canAssign) {
+        if (match(TOKEN_PLUS_EQUAL) || match(TOKEN_MINUS_EQUAL) ||
+            match(TOKEN_STAR_EQUAL) || match(TOKEN_SLASH_EQUAL)) {
+            TokenType op = parser.previous.type;
+            int valReg = expression();
+            int resultReg = allocateRegister();
+            
+            if (getOp == OP_MOVE) {
+                if (op == TOKEN_PLUS_EQUAL) {
+                    emitABC(OP_ADD, resultReg, arg, valReg);
+                } else if (op == TOKEN_MINUS_EQUAL) {
+                    emitABC(OP_SUBTRACT, resultReg, arg, valReg);
+                } else if (op == TOKEN_STAR_EQUAL) {
+                    emitABC(OP_MULTIPLY, resultReg, arg, valReg);
+                } else {
+                    emitABC(OP_DIVIDE, resultReg, arg, valReg);
+                }
+                emitABC(OP_MOVE, arg, resultReg, 0);
+            } else {
+                int loadReg = allocateRegister();
+                emitABC(getOp, loadReg, arg, 0);
+                if (op == TOKEN_PLUS_EQUAL) {
+                    emitABC(OP_ADD, resultReg, loadReg, valReg);
+                } else if (op == TOKEN_MINUS_EQUAL) {
+                    emitABC(OP_SUBTRACT, resultReg, loadReg, valReg);
+                } else if (op == TOKEN_STAR_EQUAL) {
+                    emitABC(OP_MULTIPLY, resultReg, loadReg, valReg);
+                } else {
+                    emitABC(OP_DIVIDE, resultReg, loadReg, valReg);
+                }
+                emitABC(setOp, arg, resultReg, 0);
+            }
+            nextFreeRegister--;
+            return resultReg;
         }
-        return valReg;
-    } else {
-        // If it's a local, we don't need to 'get' it, it's already in a register
-        if (getOp == OP_MOVE) return arg; 
-
-        int destReg = allocateRegister();
-        // Load the upvalue or global into a fresh register
-        emitABC(getOp, destReg, arg, 0);
-        return destReg;
+        
+        if (match(TOKEN_EQUAL)) {
+            int valReg = expression();
+            if (getOp == OP_MOVE) {
+                emitABC(OP_MOVE, arg, valReg, 0);
+            } else {
+                emitABC(setOp, arg, valReg, 0);
+            }
+            return valReg;
+        }
+        
+        if (match(TOKEN_PLUS_PLUS)) {
+            int oneReg = allocateRegister();
+            emitABx(OP_CONSTANT, oneReg, makeConstant(NUMBER_VAL(1)));
+            int resultReg = allocateRegister();
+            
+            if (getOp == OP_MOVE) {
+                emitABC(OP_ADD, resultReg, arg, oneReg);
+                emitABC(OP_MOVE, arg, resultReg, 0);
+            } else {
+                int loadReg = allocateRegister();
+                emitABC(getOp, loadReg, arg, 0);
+                emitABC(OP_ADD, resultReg, loadReg, oneReg);
+                emitABC(setOp, arg, resultReg, 0);
+            }
+            nextFreeRegister -= 2;
+            return resultReg;
+        }
     }
+    
+    if (getOp == OP_MOVE) return arg;
+
+    int destReg = allocateRegister();
+    emitABC(getOp, destReg, arg, 0);
+    return destReg;
 }
 
-// Scans the locals of a specific compiler/function for a variable name
+int tableLiteral(bool canAssign) {
+    (void)canAssign;
+    int tableReg = allocateRegister();
+    emitABC(OP_TABLE, tableReg, 0, 0);
+    
+    if (tableReg > current->maxRegister) {
+        current->maxRegister = tableReg;
+    }
+    
+    if (!check(TOKEN_RIGHT_BRACE)) {
+        do {
+            uint16_t keyConstant;
+            
+            if (check(TOKEN_NUMBER)) {
+                advance();
+                double value = strtod(parser.previous.start, NULL);
+                keyConstant = makeConstant(NUMBER_VAL(value));
+            } else if (check(TOKEN_STRING)) {
+                advance();
+                keyConstant = makeConstant(OBJ_VAL(copyString(parser.previous.start + 1, parser.previous.length - 2)));
+            } else if (check(TOKEN_IDENTIFIER)) {
+                advance();
+                keyConstant = makeConstant(OBJ_VAL(copyString(parser.previous.start, parser.previous.length)));
+            } else {
+                errorAt(&parser.current, "Expect table key.");
+                return tableReg;
+            }
+            
+            consume(TOKEN_COLON, "Expect ':' after table key.");
+            
+            int valReg = expression();
+            int keyReg = allocateRegister();
+            
+            emitABx(OP_CONSTANT, keyReg, keyConstant);
+            emitABC(OP_SET_TABLE, tableReg, keyReg, valReg);
+            
+            nextFreeRegister = tableReg + 1;
+        } while (match(TOKEN_COMMA));
+    }
+    consume(TOKEN_RIGHT_BRACE, "Expect '}' after table entries.");
+    return tableReg;
+}
+
+int subscript(int leftReg) {
+    int keyReg = expression();
+    consume(TOKEN_RIGHT_BRACKET, "Expect ']' after subscript.");
+    
+    if (match(TOKEN_EQUAL)) {
+        int valReg = expression();
+        emitABC(OP_SET_TABLE, leftReg, keyReg, valReg);
+        nextFreeRegister -= 2;
+        return leftReg;
+    }
+    
+    int destReg = allocateRegister();
+    emitABC(OP_GET_TABLE, destReg, leftReg, keyReg);
+    nextFreeRegister--;
+    return destReg;
+}
+
 int resolveLocalInCompiler(Compiler* compiler, Token* name) {
     for (int i = compiler->localCount - 1; i >= 0; i--) {
         Local* local = &compiler->locals[i];
@@ -161,7 +292,29 @@ int resolveLocalInCompiler(Compiler* compiler, Token* name) {
     return -1;
 }
 
-// Shortcut to look for locals in whatever function we are currently compiling
+int and_(int leftReg) {
+    int endJump = emitJump(OP_JUMP_IF_FALSE);
+    uint32_t inst = compilingChunk->code[endJump];
+    compilingChunk->code[endJump] = CREATE_ABx(OP_JUMP_IF_FALSE, leftReg, GET_Bx(inst));
+    
+    int rightReg = expression();
+    patchJump(endJump);
+    return rightReg;
+}
+
+int or_(int leftReg) {
+    int elseJump = emitJump(OP_JUMP_IF_FALSE);
+    uint32_t inst = compilingChunk->code[elseJump];
+    compilingChunk->code[elseJump] = CREATE_ABx(OP_JUMP_IF_FALSE, leftReg, GET_Bx(inst));
+    
+    int endJump = emitJump(OP_JUMP);
+    patchJump(elseJump);
+    
+    int rightReg = expression();
+    patchJump(endJump);
+    return rightReg;
+}
+
 static int resolveLocal(Token* name) {
     return resolveLocalInCompiler(current, name);
 }

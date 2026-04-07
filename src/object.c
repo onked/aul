@@ -7,14 +7,12 @@
 #include "vm.h"
 #include "chunk.h"
 
-// Helper to allocate memory for any object type
 static Obj* allocateObject(size_t size, ObjType type) {
     Obj* object = (Obj*)malloc(size);
     object->type = type;
-
+    object->marked = false;
     object->next = vm.objects;
     vm.objects = object;
-
     return object;
 }
 
@@ -28,12 +26,10 @@ ObjFunction* newFunction() {
 }
 
 ObjClosure* newClosure(ObjFunction* function) {
-    // Allocate the upvalue pointer array
     ObjUpvalue** upvalues = (ObjUpvalue**)malloc(sizeof(ObjUpvalue*) * function->upvalueCount);
     for (int i = 0; i < function->upvalueCount; i++) {
         upvalues[i] = NULL;
     }
-
     ObjClosure* closure = (ObjClosure*)allocateObject(sizeof(ObjClosure), OBJ_CLOSURE);
     closure->function = function;
     closure->upvalues = upvalues;
@@ -49,7 +45,15 @@ ObjUpvalue* newUpvalue(Value* slot) {
     return upvalue;
 }
 
-// FNV-1a Hashing Algorithm
+ObjTable* newTable() {
+    ObjTable* table = (ObjTable*)allocateObject(sizeof(ObjTable), OBJ_TABLE);
+    table->arrayCapacity = 0;
+    table->array = NULL;
+    initTable(&table->fields);
+    table->metatable = NULL;
+    return table;
+}
+
 static uint32_t hashString(const char* key, int length) {
     uint32_t hash = 2166136261u;
     for (int i = 0; i < length; i++) {
@@ -59,7 +63,6 @@ static uint32_t hashString(const char* key, int length) {
     return hash;
 }
 
-// Creates a new ObjString on the heap
 static ObjString* allocateString(char* chars, int length, uint32_t hash) {
     ObjString* string = (ObjString*)allocateObject(sizeof(ObjString), OBJ_STRING);
     string->length = length;
@@ -68,20 +71,15 @@ static ObjString* allocateString(char* chars, int length, uint32_t hash) {
     return string;
 }
 
-// Use this when you want to take ownership of an existing C string
 ObjString* takeString(char* chars, int length) {
     uint32_t hash = hashString(chars, length);
     return allocateString(chars, length, hash);
 }
 
-// Use this to copy a string
 ObjString* copyString(const char* chars, int length) {
     uint32_t hash = hashString(chars, length);
-    
-    // Allocate a new buffer on the heap and copy the characters
     char* heapChars = malloc(length + 1);
     memcpy(heapChars, chars, length);
     heapChars[length] = '\0';
-
     return allocateString(heapChars, length, hash);
 }

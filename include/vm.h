@@ -7,29 +7,41 @@
 #include "object.h"
 
 #define FRAMES_MAX 64
-#define STACK_MAX (FRAMES_MAX * 250) // Enough space for all frames
+#define STACK_MAX (FRAMES_MAX * 250)
+
+#define GC_HEAP_GROW_FACTOR 2
 
 typedef struct {
-    ObjClosure* closure;    // The closure containing the function and upvalues
-    uint32_t* ip;           // The "Return Address" for this specific function
-    Value* slots;           // Pointer to the first register this frame can use in the VM stack
+    ObjClosure* closure;
+    uint32_t* ip;
+    Value* slots;
 } CallFrame;
 
+typedef enum {
+    GC_PHASE_MARK_ROOTS,
+    GC_PHASE_MARK,
+    GC_PHASE_SWEEP,
+    GC_PHASE_IDLE
+} GCPhase;
+
 typedef struct {
-    struct Obj* objects;    // Linked list of all allocated objects for the GC
-    struct ObjUpvalue* openUpvalues; // List of upvalues pointing to the stack
+    struct Obj* objects;
+    struct Obj* grayStack;
+    struct ObjUpvalue* openUpvalues;
 
     Chunk* chunk;
     
-    // The "Physical" memory for all registers across all functions
-    Value stack[STACK_MAX]; 
-    Value* stackTop; 
+    Value stack[STACK_MAX];
+    Value* stackTop;
 
-    // The Call Stack
     CallFrame frames[FRAMES_MAX];
     int frameCount;
 
     Table globals;
+    
+    GCPhase gcPhase;
+    size_t bytesAllocated;
+    size_t nextGC;
 } VM;
 
 typedef enum {
@@ -38,7 +50,7 @@ typedef enum {
     INTERPRET_RUNTIME_ERROR
 } InterpretResult;
 
-extern VM vm; 
+extern VM vm;
 
 void initVM();
 void freeVM();

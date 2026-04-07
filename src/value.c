@@ -3,7 +3,7 @@
 #include <string.h>
 
 #include "value.h"
-#include "object.h" // We need this to print strings later
+#include "object.h"
 
 void initValueArray(ValueArray* array) {
     array->values = NULL;
@@ -17,7 +17,6 @@ void writeValueArray(ValueArray* array, Value value) {
         array->capacity = (oldCapacity < 8) ? 8 : oldCapacity * 2;
         array->values = (Value*)realloc(array->values, sizeof(Value) * array->capacity);
     }
-
     array->values[array->count] = value;
     array->count++;
 }
@@ -27,14 +26,12 @@ void freeValueArray(ValueArray* array) {
     initValueArray(array);
 }
 
-// Translator
 void printValue(Value value) {
     switch (value.type) {
         case VAL_BOOL:   printf(AS_BOOL(value) ? "true" : "false"); break;
         case VAL_NIL:    printf("nil"); break;
         case VAL_NUMBER: printf("%g", AS_NUMBER(value)); break;
         case VAL_OBJ: {
-            // Handle different heap objects
             if (IS_STRING(value)) {
                 printf("%s", AS_CSTRING(value));
             } else if (IS_FUNCTION(value)) {
@@ -45,13 +42,14 @@ void printValue(Value value) {
                     printf("<fn %s>", function->name->chars);
                 }
             } else if (IS_CLOSURE(value)) {
-                // For now, just treat closures like functions for printing
                 ObjFunction* function = AS_CLOSURE(value)->function;
                 if (function->name == NULL) {
                     printf("<script>");
                 } else {
                     printf("<fn %s>", function->name->chars);
                 }
+            } else if (IS_TABLE(value)) {
+                printf("<table>");
             }
             break;
         }

@@ -9,30 +9,36 @@
 #include "object.h"
 #include "value.h"
 
-// Compiler & Local Variable Types
 typedef struct {
     Token name;
     int depth;
     int reg;
 } Local;
 
-// Renamed to CompilerUpvalue to avoid conflict with object.h
 typedef struct {
     uint8_t index;
     bool isLocal;
 } CompilerUpvalue;
 
+typedef struct Loop {
+    int continueOffset;
+    int breakJump;
+    struct Loop* enclosing;
+} Loop;
+
 typedef struct Compiler {
-    struct Compiler* enclosing; // Pointer to the parent function's compiler
-    ObjFunction* function;      // The function object we are currently compiling
+    struct Compiler* enclosing;
+    ObjFunction* function;
 
     Local locals[250];
     int localCount;
+    int maxRegister;
     
-    CompilerUpvalue upvalues[250];      // Track which upvalues this function captures
-    int upvalueCount;           
+    CompilerUpvalue upvalues[250];
+    int upvalueCount;
     
     int scopeDepth;
+    Loop* currentLoop;
 } Compiler;
 
 typedef struct {
@@ -42,18 +48,17 @@ typedef struct {
     bool panicMode;
 } Parser;
 
-// Precedence & Rules
 typedef enum {
     PREC_NONE,
-    PREC_ASSIGNMENT,  // =
-    PREC_OR,          // or
-    PREC_AND,         // and
-    PREC_EQUALITY,    // == !=
-    PREC_COMPARISON,  // < > <= >=
-    PREC_TERM,        // + -
-    PREC_FACTOR,      // * /
-    PREC_UNARY,       // ! -
-    PREC_CALL,        // . ()
+    PREC_ASSIGNMENT,
+    PREC_OR,
+    PREC_AND,
+    PREC_EQUALITY,
+    PREC_COMPARISON,
+    PREC_TERM,
+    PREC_FACTOR,
+    PREC_UNARY,
+    PREC_CALL,
     PREC_PRIMARY
 } Precedence;
 
@@ -61,17 +66,14 @@ typedef int (*ParseFn)(bool canAssign);
 
 typedef struct {
     ParseFn prefix;
-    int (*infix)(int leftReg); 
+    int (*infix)(int leftReg);
     Precedence precedence;
 } ParseRule;
 
-// Globals
 extern Parser parser;
 extern Compiler* current;
 extern Chunk* compilingChunk;
 extern int nextFreeRegister;
-
-// Function Prototypes
 
 // parser.c
 void errorAt(Token* token, const char* message);
@@ -95,17 +97,27 @@ int binary(int leftReg);
 int variable(bool canAssign);
 int literal(bool canAssign);
 int call(int leftReg);
-int resolveLocalInCompiler(Compiler* compiler, Token* name); // Added for upvalue resolution
+int and_(int leftReg);
+int or_(int leftReg);
+int tableLiteral(bool canAssign);
+int subscript(int leftReg);
+int functionExpr(bool canAssign);
+int resolveLocalInCompiler(Compiler* compiler, Token* name);
 
 // compiler.c
 void emitABC(OpCode op, int a, int b, int c);
 void emitABx(OpCode op, int a, int bx);
 uint16_t makeConstant(Value value);
-int allocateRegister();
+int allocateRegister(void);
 int emitJump(OpCode op);
 void patchJump(int jumpPlaceholderOffset);
-void declaration();
-void statement();
-int resolveUpvalue(Compiler* compiler, Token* name); // Added for closures
+void initCompiler(Compiler* compiler, Compiler* enclosing);
+ObjFunction* endCompiler(void);
+void addLocal(Token name, int reg);
+int resolveUpvalue(Compiler* compiler, Token* name);
+
+// statements.c
+void statement(void);
+void declaration(void);
 
 #endif

@@ -1,0 +1,170 @@
+-- ============================================
+-- Comprehensive test for all Aul features
+-- ============================================
+
+-- Test 1: Variables and print
+print("=== Variables ===");
+loc x = 10;
+print(x);
+
+-- Test 2: Booleans and !
+print("=== Booleans ===");
+print(true);
+print(false);
+print(!true);
+print(!false);
+print(!nil);
+
+-- Test 3: Comparison operators
+print("=== Comparisons ===");
+print(x == 10);
+print(x != 10);
+print(x > 5);
+print(x < 5);
+print(x >= 10);
+print(x <= 10);
+
+-- Test 4: if/else/else if
+print("=== If/Else ===");
+if (x > 5) {
+    print("x > 5");
+} else if (x > 0) {
+    print("x > 0");
+} else {
+    print("x <= 0");
+}
+
+-- Test 5: while loop with break
+print("=== While + Break ===");
+loc i = 0;
+while (i < 5) {
+    print(i);
+    i = i + 1;
+    if (i == 3) {
+        break;
+    }
+}
+
+-- Test 6: while loop with continue
+print("=== While + Continue ===");
+loc j = 0;
+while (j < 5) {
+    j = j + 1;
+    if (j == 3) {
+        continue;
+    }
+    print(j);
+}
+
+-- Test 7: for loop
+print("=== For Loop ===");
+for (loc k = 0; k < 3; k = k + 1) {
+    print(k);
+}
+
+-- Test 8: and/or short-circuit
+print("=== And/Or ===");
+print(true and true);
+print(true and false);
+print(false or true);
+print(false or false);
+
+-- Test 9: Tables
+print("=== Tables ===");
+loc t = {1: "one", 2: "two", 3: "three"};
+print(t[1]);
+print(t[2]);
+t[1] = "ONE";
+print(t[1]);
+print(#t);
+
+-- Test 10: Tables with string keys
+print("=== String Keys ===");
+loc person = {"name": "Alice", "age": 30};
+print(person["name"]);
+print(person["age"]);
+
+-- Test 11: Function expressions in tables
+print("=== Functions in Tables ===");
+loc obj = {
+    "greet": func() {
+        print("hello from table");
+    }
+};
+obj["greet"]();
+
+-- Test 12: Metatables with __index
+print("=== Metatable __index ===");
+loc proto = {
+    "say": func() {
+        print("from proto");
+    }
+};
+loc child = {};
+setmetatable(child, {"__index": proto});
+child["say"]();
+
+-- Test 13: Metatable __call
+print("=== Metatable __call ===");
+loc callable = {};
+setmetatable(callable, {
+    "__call": func() {
+        print("called!");
+        return 42;
+    }
+});
+loc result = callable();
+print(result);
+
+-- Test 14: Closures with upvalues
+print("=== Closures ===");
+func makeCounter() {
+    loc count = 0;
+    return func() {
+        count = count + 1;
+        return count;
+    };
+}
+loc c1 = makeCounter();
+print(c1());
+print(c1());
+loc c2 = makeCounter();
+print(c2());
+print(c1());
+
+-- Test 15: Nested if
+print("=== Nested If ===");
+if (true) {
+    if (true) {
+        print("nested works");
+    }
+}
+
+-- Test 16: String concatenation
+print("=== String Concatenation ===");
+loc s = "hello" + " " + "world";
+print(s);
+
+-- Test 17: Compound assignments
+print("=== Compound Assignments ===");
+loc y = 10;
+y += 5;
+print(y);
+y -= 3;
+print(y);
+y *= 2;
+print(y);
+y /= 4;
+print(y);
+
+-- Test 18: Increment operator
+print("=== Increment ===");
+loc z = 0;
+z++;
+print(z);
+z++;
+print(z);
+z = z + 1
+print(z)
+
+print("=== All tests passed! ===");
