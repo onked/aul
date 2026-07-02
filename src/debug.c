@@ -52,6 +52,42 @@ int disassembleInstruction(Chunk *chunk, int offset) {
             return abxInstruction("OP_SET_GLOBAL", chunk, instruction, offset);
         case OP_MOVE:
             return abcInstruction("OP_MOVE", instruction, offset);
+        case OP_CLOCK:
+            return simpleRegister("OP_CLOCK", instruction, offset);
+        case OP_INCREMENT:
+            return simpleRegister("OP_INCREMENT", instruction, offset);
+        case OP_NOP:
+            return simpleRegister("OP_NOP", instruction, offset);
+        case OP_INT_ADD:
+            return abcInstruction("OP_INT_ADD", instruction, offset);
+        case OP_INT_SUBTRACT:
+            return abcInstruction("OP_INT_SUBTRACT", instruction, offset);
+        case OP_INT_MULTIPLY:
+            return abcInstruction("OP_INT_MULTIPLY", instruction, offset);
+        case OP_INT_LESS:
+            return abcInstruction("OP_INT_LESS", instruction, offset);
+        case OP_INT_GREATER:
+            return abcInstruction("OP_INT_GREATER", instruction, offset);
+        case OP_INT_LESS_EQUAL:
+            return abcInstruction("OP_INT_LESS_EQUAL", instruction, offset);
+        case OP_INT_GREATER_EQUAL:
+            return abcInstruction("OP_INT_GREATER_EQUAL", instruction, offset);
+        case OP_INT_EQUAL:
+            return abcInstruction("OP_INT_EQUAL", instruction, offset);
+        case OP_INT_NEGATE:
+            return abcInstruction("OP_INT_NEGATE", instruction, offset);
+        case OP_INT_INCREMENT:
+            return simpleRegister("OP_INT_INCREMENT", instruction, offset);
+        case OP_INT_JLT:
+            return abcInstruction("OP_INT_JLT", instruction, offset);
+        case OP_INT_JLE:
+            return abcInstruction("OP_INT_JLE", instruction, offset);
+        case OP_INT_JGT:
+            return abcInstruction("OP_INT_JGT", instruction, offset);
+        case OP_INT_JGE:
+            return abcInstruction("OP_INT_JGE", instruction, offset);
+        case OP_INT_JE:
+            return abcInstruction("OP_INT_JE", instruction, offset);
         case OP_PRINT:
             return simpleRegister("OP_PRINT", instruction, offset);
         case OP_TRUE:
@@ -68,10 +104,14 @@ int disassembleInstruction(Chunk *chunk, int offset) {
             return abcInstruction("OP_MULTIPLY", instruction, offset);
         case OP_DIVIDE:
             return abcInstruction("OP_DIVIDE", instruction, offset);
+        case OP_MODULO:
+            return abcInstruction("OP_MODULO", instruction, offset);
         case OP_NEGATE:
             return abcInstruction("OP_NEGATE", instruction, offset);
         case OP_GET_UPVALUE:
             return abcInstruction("OP_GET_UPVALUE", instruction, offset);
+        case OP_GET_READONLY_UPVALUE:
+            return abcInstruction("OP_GET_READONLY_UPVALUE", instruction, offset);
         case OP_SET_UPVALUE:
             return abcInstruction("OP_SET_UPVALUE", instruction, offset);
         case OP_RETURN:
@@ -91,6 +131,8 @@ int disassembleInstruction(Chunk *chunk, int offset) {
             return simpleRegister("OP_POP", instruction, offset);
         case OP_EQUAL:
             return abcInstruction("OP_EQUAL", instruction, offset);
+        case OP_NOT_EQUAL:
+            return abcInstruction("OP_NOT_EQUAL", instruction, offset);
         case OP_GREATER:
             return abcInstruction("OP_GREATER", instruction, offset);
         case OP_LESS:
@@ -127,11 +169,14 @@ int disassembleInstruction(Chunk *chunk, int offset) {
             printf("'\n");
             ObjFunction* func = AS_FUNCTION(chunk->constants.values[bx]);
             for (int i = 0; i < func->upvalueCount; i++) {
-                uint8_t isLocal = chunk->code[offset + 1 + i * 2];
+                uint8_t flags = chunk->code[offset + 1 + i * 2];
+                uint8_t isLocal = flags & 1;
+                uint8_t readonly = (flags >> 1) & 1;
                 uint8_t index = chunk->code[offset + 1 + i * 2 + 1];
-                printf("        %04d |                      %s %d\n",
+                printf("        %04d |                      %s%s %d\n",
                        offset + 1 + i * 2,
                        isLocal ? "local" : "upvalue",
+                       readonly ? " readonly" : "",
                        index);
             }
             return offset + 1 + func->upvalueCount * 2;

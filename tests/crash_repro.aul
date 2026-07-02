@@ -1,0 +1,15 @@
+func testPureNumbers() {
+  loc i = 0;
+  while (i < 50) {
+    loc rootTable = {};
+    loc c = 0;
+    while (c < 10) {
+      rootTable[c + 1] = c * 2;
+      c = c + 1;
+    }
+    print(" Pure number step #" + i);
+    i = i + 1;
+  }
+  print(" Pure number test complete!")
+}
+testPureNumbers()

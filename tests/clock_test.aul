@@ -1,0 +1,11 @@
+print("=== Clock Test ===");
+loc t0 = clock();
+loc sum = 0;
+loc i = 0;
+while (i < 100000000) {
+    sum = sum + i;
+    i = i + 1;
+}
+loc t1 = clock();
+print("Sum: " + sum);
+print("Elapsed: " + (t1 - t0));

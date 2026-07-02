@@ -35,7 +35,11 @@ int number(bool canAssign) {
     (void)canAssign;
     double value = strtod(parser.previous.start, NULL);
     int reg = allocateRegister();
-    emitABx(OP_CONSTANT, reg, makeConstant(NUMBER_VAL(value)));
+    if (value == (double)(int64_t)value && value >= INT48_MIN && value <= INT48_MAX) {
+        emitABx(OP_CONSTANT, reg, makeConstant(INTEGER_VAL((int64_t)value)));
+    } else {
+        emitABx(OP_CONSTANT, reg, makeConstant(NUMBER_VAL(value)));
+    }
     return reg;
 }
 
@@ -91,19 +95,19 @@ int binary(int leftReg) {
     ParseRule* rule = getRule(operatorType);
     int rightReg = parsePrecedence((Precedence)(rule->precedence + 1));
     
-    int destReg;
+    int destReg = allocateRegister();
     
     switch (operatorType) {
-        case TOKEN_PLUS:          destReg = leftReg; emitABC(OP_ADD,      destReg, leftReg, rightReg); break;
-        case TOKEN_MINUS:         destReg = leftReg; emitABC(OP_SUBTRACT, destReg, leftReg, rightReg); break;
-        case TOKEN_STAR:          destReg = leftReg; emitABC(OP_MULTIPLY, destReg, leftReg, rightReg); break;
-        case TOKEN_SLASH:         destReg = leftReg; emitABC(OP_DIVIDE,   destReg, leftReg, rightReg); break;
-        case TOKEN_EQUAL_EQUAL:   destReg = allocateRegister(); emitABC(OP_EQUAL,         destReg, leftReg, rightReg); break;
-        case TOKEN_BANG_EQUAL:    destReg = allocateRegister(); emitABC(OP_EQUAL, destReg, leftReg, rightReg); emitABC(OP_NOT, destReg, destReg, 0); break;
-        case TOKEN_GREATER:       destReg = allocateRegister(); emitABC(OP_GREATER,       destReg, leftReg, rightReg); break;
-        case TOKEN_LESS:          destReg = allocateRegister(); emitABC(OP_LESS,          destReg, leftReg, rightReg); break;
-        case TOKEN_GREATER_EQUAL: destReg = allocateRegister(); emitABC(OP_GREATER_EQUAL, destReg, leftReg, rightReg); break;
-        case TOKEN_LESS_EQUAL:    destReg = allocateRegister(); emitABC(OP_LESS_EQUAL,    destReg, leftReg, rightReg); break;
+        case TOKEN_PLUS:          emitABC(OP_ADD,      destReg, leftReg, rightReg); break;
+        case TOKEN_MINUS:         emitABC(OP_SUBTRACT, destReg, leftReg, rightReg); break;
+        case TOKEN_STAR:          emitABC(OP_MULTIPLY, destReg, leftReg, rightReg); break;
+        case TOKEN_SLASH:         emitABC(OP_DIVIDE,   destReg, leftReg, rightReg); break;
+        case TOKEN_EQUAL_EQUAL:   emitABC(OP_EQUAL,     destReg, leftReg, rightReg); break;
+        case TOKEN_BANG_EQUAL:    emitABC(OP_NOT_EQUAL, destReg, leftReg, rightReg); break;
+        case TOKEN_GREATER:       emitABC(OP_GREATER,       destReg, leftReg, rightReg); break;
+        case TOKEN_LESS:          emitABC(OP_LESS,          destReg, leftReg, rightReg); break;
+        case TOKEN_GREATER_EQUAL: emitABC(OP_GREATER_EQUAL, destReg, leftReg, rightReg); break;
+        case TOKEN_LESS_EQUAL:    emitABC(OP_LESS_EQUAL,    destReg, leftReg, rightReg); break;
         default: return 0;
     }
 
@@ -115,6 +119,13 @@ int variable(bool canAssign) {
     Token name = parser.previous;
     
     // builtins
+    if (name.length == 5 && memcmp(name.start, "clock", 5) == 0) {
+        consume(TOKEN_LEFT_PAREN, "Expect '(' after 'clock'.");
+        consume(TOKEN_RIGHT_PAREN, "Expect ')' after 'clock'.");
+        int destReg = allocateRegister();
+        emitABC(OP_CLOCK, destReg, 0, 0);
+        return destReg;
+    }
     if (name.length == 12 && memcmp(name.start, "setmetatable", 12) == 0) {
         consume(TOKEN_LEFT_PAREN, "Expect '(' after 'setmetatable'.");
         int tableReg = expression();
@@ -135,13 +146,15 @@ int variable(bool canAssign) {
     
     int arg;
     OpCode getOp, setOp;
+    bool upvalueReadonly = false;
 
     arg = resolveLocal(&name);
     if (arg != -1) {
         getOp = OP_MOVE;
         setOp = OP_MOVE;
     } else if ((arg = resolveUpvalue(current, &name)) != -1) {
-        getOp = OP_GET_UPVALUE;
+        upvalueReadonly = current->upvalues[arg].readonly;
+        getOp = upvalueReadonly ? OP_GET_READONLY_UPVALUE : OP_GET_UPVALUE;
         setOp = OP_SET_UPVALUE;
     } else {
         arg = makeConstant(OBJ_VAL(copyString(name.start, name.length)));
@@ -150,6 +163,36 @@ int variable(bool canAssign) {
     }
 
     if (canAssign) {
+        // mark local/upvalue as mutated when there's any assignment
+        if (setOp == OP_MOVE) {
+            for (int k = 0; k < current->localCount; k++) {
+                if (current->locals[k].reg == arg) {
+                    current->locals[k].mutated = true;
+                    break;
+                }
+            }
+        } else if (setOp == OP_SET_UPVALUE) {
+            current->upvalues[arg].readonly = false;
+            Compiler* c = current->enclosing;
+            uint8_t localReg = current->upvalues[arg].index;
+            while (c) {
+                if (current->upvalues[arg].isLocal) {
+                    for (int k = 0; k < c->localCount; k++) {
+                        if ((uint8_t)c->locals[k].reg == localReg) {
+                            c->locals[k].mutated = true;
+                            goto mutatedDone;
+                        }
+                    }
+                } else {
+                    localReg = c->upvalues[localReg].index;
+                    c = c->enclosing;
+                    continue;
+                }
+                break;
+            }
+            mutatedDone:;
+        }
+
         if (match(TOKEN_PLUS_EQUAL) || match(TOKEN_MINUS_EQUAL) ||
             match(TOKEN_STAR_EQUAL) || match(TOKEN_SLASH_EQUAL)) {
             TokenType op = parser.previous.type;
@@ -197,7 +240,7 @@ int variable(bool canAssign) {
         
         if (match(TOKEN_PLUS_PLUS)) {
             int oneReg = allocateRegister();
-            emitABx(OP_CONSTANT, oneReg, makeConstant(NUMBER_VAL(1)));
+            emitABx(OP_CONSTANT, oneReg, makeConstant(INTEGER_VAL(1)));
             int resultReg = allocateRegister();
             
             if (getOp == OP_MOVE) {
@@ -237,7 +280,11 @@ int tableLiteral(bool canAssign) {
             if (check(TOKEN_NUMBER)) {
                 advance();
                 double value = strtod(parser.previous.start, NULL);
-                keyConstant = makeConstant(NUMBER_VAL(value));
+                if (value == (double)(int64_t)value && value >= INT48_MIN && value <= INT48_MAX) {
+                    keyConstant = makeConstant(INTEGER_VAL((int64_t)value));
+                } else {
+                    keyConstant = makeConstant(NUMBER_VAL(value));
+                }
             } else if (check(TOKEN_STRING)) {
                 advance();
                 keyConstant = makeConstant(OBJ_VAL(copyString(parser.previous.start + 1, parser.previous.length - 2)));
@@ -269,9 +316,12 @@ int subscript(int leftReg) {
     consume(TOKEN_RIGHT_BRACKET, "Expect ']' after subscript.");
     
     if (match(TOKEN_EQUAL)) {
+        int saveReg = allocateRegister();
+        emitABC(OP_MOVE, saveReg, keyReg, 0);
+        nextFreeRegister = saveReg + 1;
         int valReg = expression();
-        emitABC(OP_SET_TABLE, leftReg, keyReg, valReg);
-        nextFreeRegister -= 2;
+        emitABC(OP_SET_TABLE, leftReg, saveReg, valReg);
+        nextFreeRegister = saveReg;
         return leftReg;
     }
     

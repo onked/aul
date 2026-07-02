@@ -1,0 +1,6 @@
+loc sum = 0;
+loc i = 0;
+while (i < 100000000) {
+    sum = sum + i;
+    i = i + 1;
+}

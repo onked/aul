@@ -13,11 +13,13 @@ typedef struct {
     Token name;
     int depth;
     int reg;
+    bool mutated;
 } Local;
 
 typedef struct {
     uint8_t index;
     bool isLocal;
+    bool readonly;
 } CompilerUpvalue;
 
 typedef struct Loop {
@@ -33,6 +35,7 @@ typedef struct Compiler {
     Local locals[250];
     int localCount;
     int maxRegister;
+    int localMaxReg;
     
     CompilerUpvalue upvalues[250];
     int upvalueCount;
@@ -119,5 +122,8 @@ int resolveUpvalue(Compiler* compiler, Token* name);
 // statements.c
 void statement(void);
 void declaration(void);
+
+// typeinfer.c
+void specializeTypes(Chunk* chunk);
 
 #endif

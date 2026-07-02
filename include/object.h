@@ -22,12 +22,14 @@ struct Obj {
 typedef struct {
     uint8_t index;
     bool isLocal;
+    bool readonly;
 } Upvalue;
 
 typedef struct {
     Obj obj;
     int arity;
     int upvalueCount;
+    int maxRegs; // number of registers this function uses (for GC scanning)
     Chunk chunk;
     struct ObjString* name;
     Upvalue upvalues[250];
@@ -44,6 +46,7 @@ typedef struct {
     Obj obj;
     ObjFunction* function;
     ObjUpvalue** upvalues;
+    Value* readonlyValues;
     int upvalueCount;
 } ObjClosure;
 
@@ -53,6 +56,12 @@ typedef struct ObjTable {
     Value* array;
     Table fields;
     struct ObjTable* metatable;
+    uint32_t writeGen;
+    uint32_t metaGen;
+    Value cachedIndex;
+    Value cachedNewIndex;
+    Value cachedCall;
+    Value cachedLen;
 } ObjTable;
 
 struct ObjString {

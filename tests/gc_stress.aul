@@ -1,0 +1,212 @@
+-- GC Stress Test for Aul
+-- This script creates many objects to trigger and stress test the garbage collector
+
+print("=== GC Stress Test Started ===")
+
+-- Test 1: Create and discard many strings
+print("Test 1: String allocation stress...")
+func testStrings() {
+    loc i = 0;
+    while (i < 500) {
+        loc s = "String number ";
+        s = s + i;
+        if (i == 100) {
+            print("  Created 100 strings");
+        }
+        if (i == 200) {
+            print("  Created 200 strings");
+        }
+        if (i == 300) {
+            print("  Created 300 strings");
+        }
+        if (i == 400) {
+            print("  Created 400 strings");
+        }
+        i = i + 1;
+    }
+    print("  String test complete")
+}
+testStrings()
+
+-- Test 2: Create many closures with upvalues
+print("Test 2: Closure/upvalue stress...")
+func makeClosureFactory() {
+    loc captured = 0;
+    func createClosure() {
+        captured = captured + 1;
+        return captured;
+    }
+    return createClosure;
+}
+
+func testClosures() {
+    loc closures = {};
+    loc i = 0;
+    while (i < 200) {
+        closures[i + 1] = makeClosureFactory();
+        if (i == 50) {
+            print("  Created 50 closure factories");
+        }
+        if (i == 100) {
+            print("  Created 100 closure factories");
+        }
+        if (i == 150) {
+            print("  Created 150 closure factories");
+        }
+        i = i + 1;
+    }
+    print("  Closure test complete")
+}
+testClosures()
+
+-- Test 3: Nested function stress (tests upvalue chaining)
+print("Test 3: Nested function stress...")
+func outer() {
+    loc outerVar = 100;
+    func middle() {
+        loc middleVar = 200;
+        func inner() {
+            loc innerVar = 300;
+            return outerVar + middleVar + innerVar;
+        }
+        return inner;
+    }
+    return middle();
+}
+
+func testNested() {
+    loc i = 0;
+    while (i < 100) {
+        loc fn = outer();
+        loc result = fn();
+        if (i == 25) {
+            print("  Nested call 25 result: " + result);
+        }
+        if (i == 50) {
+            print("  Nested call 50 result: " + result);
+        }
+        if (i == 75) {
+            print("  Nested call 75 result: " + result);
+        }
+        i = i + 1;
+    }
+    print("  Nested function test complete")
+}
+testNested()
+
+-- Test 4: Table creation and disposal
+print("Test 4: Table stress...")
+func testTables() {
+    loc i = 0;
+    while (i < 300) {
+        loc t = {};
+        t[i + 1] = "value";
+        if (i == 75) {
+            print("  Created 75 tables");
+        }
+        if (i == 150) {
+            print("  Created 150 tables");
+        }
+        if (i == 225) {
+            print("  Created 225 tables");
+        }
+        i = i + 1;
+    }
+    print("  Table test complete")
+}
+testTables()
+
+-- Test 5: Mixed allocation pattern
+print("Test 5: Mixed allocation stress...")
+func mixedAlloc() {
+    loc i = 0;
+    while (i < 100) {
+        loc str = "iteration_";
+        str = str + i;
+        loc tbl = {};
+        tbl[i + 1] = i * 2;
+        func inner() {
+            return i * 2;
+        }
+        loc result = inner();
+        if (i == 25) {
+            print("  Mixed iteration 25: " + result);
+        }
+        if (i == 50) {
+            print("  Mixed iteration 50: " + result);
+        }
+        if (i == 75) {
+            print("  Mixed iteration 75: " + result);
+        }
+        i = i + 1;
+    }
+    print("  Mixed allocation test complete")
+}
+mixedAlloc()
+
+-- Test 6: Shallow nesting stress (avoid stack overflow)
+print("Test 6: Shallow nesting stress...")
+func shallowNest() {
+    loc a = 1;
+    loc b = 2;
+    loc c = 3;
+    return a + b + c;
+}
+
+func testShallowNesting() {
+    loc i = 0;
+    while (i < 50) {
+        loc result = shallowNest();
+        if (i == 10) {
+            print("  Shallow nesting 10: " + result);
+        }
+        if (i == 20) {
+            print("  Shallow nesting 20: " + result);
+        }
+        if (i == 30) {
+            print("  Shallow nesting 30: " + result);
+        }
+        if (i == 40) {
+            print("  Shallow nesting 40: " + result);
+        }
+        i = i + 1;
+    }
+    print("  Shallow nesting test complete")
+}
+testShallowNesting()
+
+-- Test 7: Rapid create/destroy cycles
+print("Test 7: Rapid create/destroy cycles...")
+func rapidCycles() {
+    loc cycle = 0;
+    while (cycle < 10) {
+        loc i = 0;
+        while (i < 50) {
+            loc s = "cycle_";
+            s = s + cycle;
+            s = s + "_item_";
+            s = s + i;
+            i = i + 1;
+        }
+        print("  Completed cycle " + cycle);
+        cycle = cycle + 1;
+    }
+    print("  Rapid cycle test complete")
+}
+rapidCycles()
+
+-- Test 8: Large table with many entries
+print("Test 8: Large table stress...")
+func largeTableTest() {
+    loc bigTable = {};
+    loc i = 0;
+    while (i < 1000) {
+        bigTable[i + 1] = "value_";
+        i = i + 1;
+    }
+    print("  Large table test complete")
+}
+largeTableTest()
+
+print("=== GC Stress Test Complete ===")
+print("All tests passed successfully!")

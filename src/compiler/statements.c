@@ -91,7 +91,9 @@ static void function() {
     emitABx(OP_CLOSURE, closureReg, makeConstant(OBJ_VAL(functionObj)));
     
     for (int i = 0; i < functionObj->upvalueCount; i++) {
-        writeChunk(compilingChunk, functionObj->upvalues[i].isLocal ? 1 : 0, parser.previous.line);
+        uint8_t flags = functionObj->upvalues[i].isLocal ? 1 : 0;
+        if (functionObj->upvalues[i].readonly) flags |= 2;
+        writeChunk(compilingChunk, flags, parser.previous.line);
         writeChunk(compilingChunk, functionObj->upvalues[i].index, parser.previous.line);
     }
 
@@ -131,7 +133,9 @@ int functionExpr(bool canAssign) {
     emitABx(OP_CLOSURE, closureReg, makeConstant(OBJ_VAL(functionObj)));
     
     for (int i = 0; i < functionObj->upvalueCount; i++) {
-        writeChunk(compilingChunk, functionObj->upvalues[i].isLocal ? 1 : 0, parser.previous.line);
+        uint8_t flags = functionObj->upvalues[i].isLocal ? 1 : 0;
+        if (functionObj->upvalues[i].readonly) flags |= 2;
+        writeChunk(compilingChunk, flags, parser.previous.line);
         writeChunk(compilingChunk, functionObj->upvalues[i].index, parser.previous.line);
     }
 
@@ -141,7 +145,6 @@ int functionExpr(bool canAssign) {
 int call(int leftReg) {
     int callReg = allocateRegister();
     
-    // it's possible the function being called is in the same register as the variable we're assigning to, so we need to move it to a safe place first
     if (callReg == leftReg) {
         callReg = allocateRegister();
     }
@@ -155,7 +158,10 @@ int call(int leftReg) {
     if (!check(TOKEN_RIGHT_PAREN)) {
         do {
             nextFreeRegister = nextArgSlot;
-            expression(); 
+            int exprReg = expression();
+            if (exprReg != nextArgSlot) {
+                emitABC(OP_MOVE, nextArgSlot, exprReg, 0);
+            }
             nextArgSlot++;
             argCount++;
         } while (match(TOKEN_COMMA));
@@ -165,7 +171,9 @@ int call(int leftReg) {
     // emit the call instruction with the function register and argument count
     emitABC(OP_CALL, callReg, argCount, 0);
 
-    nextFreeRegister = leftReg + 1; 
+    int callMinFree = current->maxRegister + 1;
+    if (leftReg + 1 > callMinFree) callMinFree = leftReg + 1;
+    nextFreeRegister = callMinFree;
     return callReg;
 }
 
@@ -365,6 +373,10 @@ void statement() {
     match(TOKEN_SEMICOLON);
 }
 
+static void reuseRegisters() {
+    nextFreeRegister = current->localMaxReg + 1;
+}
+
 void declaration() {
     if (match(TOKEN_LOC)) {
         consume(TOKEN_IDENTIFIER, "Expect variable name.");
@@ -392,5 +404,6 @@ void declaration() {
     } else {
         statement();
     }
+    reuseRegisters();
     if (parser.panicMode) synchronize();
 }

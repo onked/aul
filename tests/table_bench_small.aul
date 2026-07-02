@@ -1,0 +1,23 @@
+loc N = 1000;
+loc t0 = clock();
+
+loc t = {};
+loc i = 1;
+
+while (i <= N) {
+    t[i] = i * 2;
+    i = i + 1;
+}
+
+loc sum = 0;
+i = 1;
+
+while (i <= N) {
+    sum = sum + t[i];
+    i = i + 1;
+}
+
+loc t1 = clock();
+
+print("Sum: " + sum);
+print("Elapsed: " + (t1 - t0));
