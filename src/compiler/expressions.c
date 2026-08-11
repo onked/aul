@@ -108,10 +108,10 @@ int binary(int leftReg) {
         case TOKEN_LESS:          emitABC(OP_LESS,          destReg, leftReg, rightReg); break;
         case TOKEN_GREATER_EQUAL: emitABC(OP_GREATER_EQUAL, destReg, leftReg, rightReg); break;
         case TOKEN_LESS_EQUAL:    emitABC(OP_LESS_EQUAL,    destReg, leftReg, rightReg); break;
+        case TOKEN_PERCENT:       emitABC(OP_MODULO,    destReg, leftReg, rightReg); break;
         default: return 0;
     }
 
-    nextFreeRegister--;
     return destReg;
 }
 
@@ -143,7 +143,17 @@ int variable(bool canAssign) {
         emitABC(OP_GET_METATABLE, destReg, tableReg, 0);
         return destReg;
     }
-    
+    if (name.length == 4 && memcmp(name.start, "sqrt", 4) == 0) {
+        consume(TOKEN_LEFT_PAREN, "Expect '(' after 'sqrt'.");
+        int argReg = expression();
+        consume(TOKEN_RIGHT_PAREN, "Expect ')' after argument.");
+        int destReg = allocateRegister();
+        emitABC(OP_SQRT, destReg, argReg, 0);
+        return destReg;
+    }
+
+
+
     int arg;
     OpCode getOp, setOp;
     bool upvalueReadonly = false;
@@ -190,9 +200,7 @@ int variable(bool canAssign) {
                 }
                 break;
             }
-            mutatedDone:;
-        }
-
+            mutatedDone:; }
         if (match(TOKEN_PLUS_EQUAL) || match(TOKEN_MINUS_EQUAL) ||
             match(TOKEN_STAR_EQUAL) || match(TOKEN_SLASH_EQUAL)) {
             TokenType op = parser.previous.type;
@@ -327,7 +335,6 @@ int subscript(int leftReg) {
     
     int destReg = allocateRegister();
     emitABC(OP_GET_TABLE, destReg, leftReg, keyReg);
-    nextFreeRegister--;
     return destReg;
 }
 
@@ -363,6 +370,25 @@ int or_(int leftReg) {
     int rightReg = expression();
     patchJump(endJump);
     return rightReg;
+}
+
+int dotAccess(int leftReg) {
+    consume(TOKEN_IDENTIFIER, "Expect identifier after '.'.");
+    Token name = parser.previous;
+    int keyReg = allocateRegister();
+    emitABx(OP_CONSTANT, keyReg, makeConstant(OBJ_VAL(copyString(name.start, name.length))));
+
+
+    if (match(TOKEN_EQUAL)) {
+        int valReg = expression();
+        emitABC(OP_SET_TABLE, leftReg, keyReg, valReg);
+        nextFreeRegister = keyReg;
+        return leftReg;
+    }
+
+    int destReg = allocateRegister();
+    emitABC(OP_GET_TABLE, destReg, leftReg, keyReg);
+    return destReg;
 }
 
 static int resolveLocal(Token* name) {

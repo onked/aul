@@ -104,6 +104,7 @@ int and_(int leftReg);
 int or_(int leftReg);
 int tableLiteral(bool canAssign);
 int subscript(int leftReg);
+int dotAccess(int leftReg);
 int functionExpr(bool canAssign);
 int resolveLocalInCompiler(Compiler* compiler, Token* name);
 

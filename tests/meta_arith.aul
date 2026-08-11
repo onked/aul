@@ -1,0 +1,54 @@
+-- Arithmetic metamethods under GC pressure
+print("=== Vector arithmetic metamethods ===");
+
+loc VecMeta = {};
+
+func makeVec(x, y) {
+    loc v = {"x": x, "y": y};
+    setmetatable(v, VecMeta);
+    return v;
+}
+
+VecMeta["__add"] = func(a, b) {
+    return makeVec(a["x"] + b["x"], a["y"] + b["y"]);
+};
+VecMeta["__sub"] = func(a, b) {
+    return makeVec(a["x"] - b["x"], a["y"] - b["y"]);
+};
+VecMeta["__mul"] = func(a, b) {
+    return makeVec(a["x"] * b["x"], a["y"] * b["y"]);
+};
+VecMeta["__div"] = func(a, b) {
+    return makeVec(a["x"] / b["x"], a["y"] / b["y"]);
+};
+
+-- Basic correctness
+loc p = makeVec(3, 4);
+loc q = makeVec(1, 2);
+loc r = p + q;
+print(r["x"]);   -- 4
+print(r["y"]);   -- 6
+loc s = p - q;
+print(s["x"]);   -- 2
+print(s["y"]);   -- 2
+loc m = p * q;
+print(m["x"]);   -- 3
+print(m["y"]);   -- 8
+loc d = p / q;
+print(d["x"]);   -- 3
+print(d["y"]);   -- 2
+
+-- Stress: churn allocations so the incremental GC runs mid-metamethod
+print("=== GC stress ===");
+loc acc = makeVec(0, 0);
+loc i = 0;
+while (i < 20000) {
+    loc a = makeVec(i, i + 1);
+    loc b = makeVec(1, 1);
+    loc c = (a + b) * b - b;
+    acc = acc + makeVec(c["x"] - i, 0);
+    i = i + 1;
+}
+print(acc["x"]);   -- should be 0 (each step contributes 0)
+print(acc["y"]);   -- should be 0
+print("=== Metamethod tests passed! ===");

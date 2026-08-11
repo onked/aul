@@ -78,6 +78,8 @@ int disassembleInstruction(Chunk *chunk, int offset) {
             return abcInstruction("OP_INT_NEGATE", instruction, offset);
         case OP_INT_INCREMENT:
             return simpleRegister("OP_INT_INCREMENT", instruction, offset);
+        case OP_INT_MODULO:
+            return abcInstruction("OP_INT_MODULO", instruction, offset);
         case OP_INT_JLT:
             return abcInstruction("OP_INT_JLT", instruction, offset);
         case OP_INT_JLE:

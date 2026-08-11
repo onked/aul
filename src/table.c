@@ -11,6 +11,7 @@
 void initTable(Table* table) {
     table->count = 0;
     table->capacity = 0;
+    table->generation = 0;
     table->entries = NULL;
 }
 
@@ -76,6 +77,7 @@ static void adjustCapacity(Table* table, int capacity) {
     }
     table->entries = entries;
     table->capacity = capacity;
+    table->generation++;
 }
 
 bool tableSet(Table* table, Value key, Value value) {
@@ -94,6 +96,50 @@ bool tableSet(Table* table, Value key, Value value) {
     return isNewKey;
 }
 
+static int inlineFind(ObjTable* table, Value key) {
+    for (int i = 0; i < table->inlineCount; i++) {
+        if (valuesEqual(table->inlineKeys[i], key)) return i;
+    }
+    return -1;
+}
+
+bool objTableGet(ObjTable* table, Value key, Value* value) {
+    if (table->inlineCount >= 0) {
+        int index = inlineFind(table, key);
+        if (index >= 0) {
+            *value = table->inlineVals[index];
+            return true;
+        }
+    }
+    return tableGet(&table->fields, key, value);
+}
+
+void objTablePromote(ObjTable* table) {
+    int count = table->inlineCount;
+    table->inlineCount = -1;
+    for (int i = 0; i < count; i++) {
+        tableSet(&table->fields, table->inlineKeys[i], table->inlineVals[i]);
+    }
+}
+
+bool objTableSet(ObjTable* table, Value key, Value value) {
+    if (table->inlineCount >= 0) {
+        int index = inlineFind(table, key);
+        if (index >= 0) {
+            table->inlineVals[index] = value;
+            return false;
+        }
+        if (table->inlineCount < TABLE_INLINE_CAPACITY) {
+            table->inlineKeys[table->inlineCount] = key;
+            table->inlineVals[table->inlineCount] = value;
+            table->inlineCount++;
+            return true;
+        }
+        objTablePromote(table);
+    }
+    return tableSet(&table->fields, key, value);
+}
+
 bool tableGet(Table* table, Value key, Value* value) {
     if (table->count == 0) return false;
 
@@ -103,6 +149,12 @@ bool tableGet(Table* table, Value key, Value* value) {
     *value = entry->value;
     return true;
 }
+Entry* tableGetEntry(Table* table, Value key) {
+    if (table->count == 0) return NULL;
+    Entry* entry = findEntry(table->entries, table->capacity, key);
+    if (IS_NIL(entry->key)) return NULL;
+    return entry;
+}
 
 ObjString* tableFindString(Table* table, const char* chars, int length, uint32_t hash) {
     if (table->capacity == 0) return NULL;
@@ -111,7 +163,7 @@ ObjString* tableFindString(Table* table, const char* chars, int length, uint32_t
         Entry* entry = &table->entries[index];
         if (IS_NIL(entry->key)) {
             if (IS_BOOL(entry->value) && AS_BOOL(entry->value)) {
-                // tombstone
+                // tombstone: keep probing past deleted entries
             } else {
                 return NULL;
             }
@@ -135,6 +187,7 @@ bool tableDelete(Table* table, Value key) {
 
     entry->key = NIL_VAL;
     entry->value = BOOL_VAL(true);
+    table->generation++;
     return true;
 }
 

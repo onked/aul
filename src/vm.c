@@ -14,6 +14,7 @@
 #include "table.h"
 #include "object.h"
 #include "memory.h"
+#include "libs/math.h"
 
 // uncomment this to see bytecode during execution
 // #define DEBUG_TRACE_EXECUTION
@@ -61,9 +62,15 @@ void initVM()
     vm.mmNewIndex = copyString("__newindex", 10);
     vm.mmCall     = copyString("__call", 6);
     vm.mmLen      = copyString("__len", 5);
-    for (int i = 0; i < IC_SIZE; i++) {
-        vm.inlineCache[i].valid = false;
+    vm.mmAdd      = copyString("__add", 5);
+    vm.mmSub      = copyString("__sub", 5);
+    vm.mmMul      = copyString("__mul", 5);
+    vm.mmDiv      = copyString("__div", 5);
+    for (int i = 0; i < GLOBAL_CACHE_SIZE; i++) {
+        vm.globalCache[i].name = NULL;
     }
+
+    initNativeLibraries();
 }
 
 void freeVM()
@@ -87,7 +94,12 @@ void freeVM()
 }
 
 void gcWriteBarrier(Value value) {
-    if (vm.gcPhase != GC_PHASE_IDLE && IS_OBJ(value)) {
+    // Shade only during marking. During SWEEP a stored value is either already
+    // marked (a survivor the mutator still holds) or a fresh white object ahead
+    // of the sweep pointer; marking it here would instead leave a stale mark
+    // that corrupts the next cycle (see allocateObject for the full argument).
+    if ((vm.gcPhase == GC_PHASE_MARK || vm.gcPhase == GC_PHASE_ATOMIC)
+        && IS_OBJ(value)) {
         markObject(AS_OBJ(value));
     }
 }
@@ -98,49 +110,41 @@ void gcStep(void)
         case GC_PHASE_IDLE:
             return;
 
-        case GC_PHASE_MARK_ROOTS:
-#ifdef DEBUG_LOG_GC
-            printf("-- gc begin (incremental)\n");
-#endif
-            markRoots();
-            vm.gcPhase = GC_PHASE_MARK;
-            break;
         case GC_PHASE_MARK:
-        {
-            size_t marksDone = 0;
-
-            // rescan registers that may have been modified since the last step
-            if (vm.frameCount > 0) {
-                CallFrame* frame = &vm.frames[vm.frameCount - 1];
-                int regCount = frame->closure->function->maxRegs;
-                if (regCount == 0) regCount = 1;
-                for (int r = 0; r < regCount; r++) {
-                    markValue(frame->slots[r]);
-                }
+        case GC_PHASE_ATOMIC:
+            // The reallocate() threshold hook already ran markRoots() and
+            // shaded the root set gray; this step drains the gray stack along
+            // with any barrier-shaded tables queued on grayagain, flips the
+            // white colors, then starts the incremental sweep.
+            while (vm.grayCount > 0) {
+                blackenObject(vm.grayStack[--vm.grayCount]);
             }
-
-            while (vm.grayCount > 0 && marksDone < vm.marksPerStep) {
-                Obj* object = vm.grayStack[--vm.grayCount];
-                blackenObject(object);
-                marksDone++;
+            while (vm.grayagain != NULL) {
+                ObjTable* t = vm.grayagain;
+                vm.grayagain = t->gclist;
+                t->gclist = NULL;
+                growGrayStack();
+                vm.grayStack[vm.grayCount++] = (Obj*)t;
             }
-
-            if (vm.grayCount == 0) {
-                vm.gcPhase = GC_PHASE_SWEEP;
-                vm.sweepObj = vm.objects;
+            while (vm.grayCount > 0) {
+                blackenObject(vm.grayStack[--vm.grayCount]);
             }
+            vm.otherWhite = vm.currentWhite;
+            vm.currentWhite ^= 1;
+            vm.gcPhase = GC_PHASE_SWEEP;
+            vm.sweepObj = vm.objects;
+            vm.sweepPrev = NULL;
             break;
-        }
 
         case GC_PHASE_SWEEP:
         {
             size_t swept = 0;
-            Obj* previous = NULL;
+            Obj* previous = vm.sweepPrev;
             Obj* object = vm.sweepObj;
 
             while (object != NULL && swept < vm.marksPerStep) {
-                if (object->marked) {
-                    object->marked = false;
+                if ((object->marked & GC_COLOR_MASK) != vm.otherWhite) {
+                    object->marked = (object->marked & ~GC_COLOR_MASK) | vm.currentWhite;
                     previous = object;
                     object = object->next;
                 } else {
@@ -159,13 +163,29 @@ void gcStep(void)
             }
 
             vm.sweepObj = object;
+            vm.sweepPrev = previous;
 
             if (object == NULL) {
                 vm.gcPhase = GC_PHASE_IDLE;
                 vm.nextGC = vm.bytesAllocated * GC_HEAP_GROW_FACTOR;
-
+                if (vm.newObjects != NULL) {
+                    Obj* newHead = vm.newObjects;
+                    vm.newObjects = NULL;
+                    Obj* tail = newHead;
+                    while (tail->next != NULL) tail = tail->next;
+                    tail->next = vm.objects;
+                    vm.objects = newHead;
+                }
+                for (Obj* o = vm.objects; o != NULL; o = o->next) {
+                    if (o->type == OBJ_FUNCTION) {
+                        Chunk* c = &((ObjFunction*)o)->chunk;
+                        if (c->caches) {
+                            for (int i = 0; i < c->count; i++) c->caches[i].valid = false;
+                        }
+                    }
+                }
 #ifdef DEBUG_LOG_GC
-                printf("-- gc end (incremental)\n");
+                printf("-- gc end\n");
 #endif
             }
             break;
@@ -212,10 +232,71 @@ static void closeUpvalues(Value* last) {
     }
 }
 
-static InterpretResult run()
+static InterpretResult run(int baseFrame);
+
+// Look up a binary metamethod (by interned name) on either operand's metatable.
+// Returns NIL_VAL if neither operand is a table with that metamethod.
+static Value findBinaryMetamethod(Value a, Value b, ObjString* name) {
+    Value handler = NIL_VAL;
+    if (IS_TABLE(a) && AS_TABLE(a)->metatable != NULL) {
+        tableGet(&AS_TABLE(a)->metatable->fields, OBJ_VAL((Obj*)name), &handler);
+    }
+    if (IS_NIL(handler) && IS_TABLE(b) && AS_TABLE(b)->metatable != NULL) {
+        tableGet(&AS_TABLE(b)->metatable->fields, OBJ_VAL((Obj*)name), &handler);
+    }
+    return handler;
+}
+
+// Invoke a binary metamethod handler(a, b) via a nested VM frame, writing the
+// result into *out. Returns false on error (already reported). `scratch` is a
+// free register region (caller's maxRegs and up) used as the call frame.
+static bool callBinaryMetamethod(Value handler, Value a, Value b,
+                                 Value* scratch, Value* out) {
+    ObjClosure* closure;
+    if (IS_CLOSURE(handler)) {
+        closure = AS_CLOSURE(handler);
+    } else if (IS_FUNCTION(handler)) {
+        closure = newClosure(AS_FUNCTION(handler));
+        for (int i = 0; i < closure->function->upvalueCount; i++) {
+            closure->upvalues[i] = NULL;
+        }
+    } else {
+        runtimeError("Metamethod must be a function.");
+        return false;
+    }
+    if (closure->function->arity != 2) {
+        runtimeError("Binary metamethod must take 2 arguments.");
+        return false;
+    }
+    if (vm.frameCount >= FRAMES_MAX) {
+        runtimeError("Stack overflow.");
+        return false;
+    }
+
+    // Marshal [handler, a, b] into the scratch region.
+    scratch[0] = handler;
+    scratch[1] = a;
+    scratch[2] = b;
+
+    int base = vm.frameCount;
+    CallFrame* mf = &vm.frames[vm.frameCount++];
+    mf->closure = closure;
+    mf->ip = closure->function->chunk.code;
+    mf->slots = scratch;
+
+    InterpretResult r = run(base);
+    if (r != INTERPRET_OK) return false;
+
+    *out = scratch[0];
+    return true;
+}
+
+static InterpretResult run(int baseFrame)
 {
 
-#define FRAME (vm.frames[vm.frameCount - 1])
+    register CallFrame* frame = &vm.frames[vm.frameCount - 1];
+#define FRAME (*frame)
+#define RELOAD_FRAME() (frame = &vm.frames[vm.frameCount - 1])
 #define READ_INST() (*FRAME.ip++)
 #define READ_CONSTANT(inst) (FRAME.closure->function->chunk.constants.values[GET_Bx(inst)])
 #define REG(index) (FRAME.slots[index])
@@ -236,8 +317,14 @@ static InterpretResult run()
     if (vm.gcPhase != GC_PHASE_IDLE) gcStep(); \
 } while (0)
 
+#ifdef __GNUC__
+#define DISPATCH()      do { instruction = READ_INST(); goto *dispatch[GET_OP(instruction)]; } while (0)
+#define DISPATCH_POLL() do { GC_STEP(); instruction = READ_INST(); goto *dispatch[GET_OP(instruction)]; } while (0)
+#endif
+
 #define GC_WRITE_BARRIER(val) do { \
-    if (vm.gcPhase != GC_PHASE_IDLE && IS_OBJ(val)) { \
+    if ((vm.gcPhase == GC_PHASE_MARK || vm.gcPhase == GC_PHASE_ATOMIC) \
+        && IS_OBJ(val)) { \
         markObject(AS_OBJ(val)); \
     } \
 } while (0)
@@ -247,6 +334,25 @@ static InterpretResult run()
     GC_WRITE_BARRIER(_v); \
     FRAME.slots[(r)] = _v; \
 } while (0)
+
+// Attempt a binary metamethod (av,bv in scope). On success stores into reg A of
+// `inst` and dispatches; if no handler exists, falls through to the caller's
+// error path. GNUC (computed-goto) build only.
+#ifdef __GNUC__
+#define TRY_BINARY_META(mmName) do { \
+    Value _h = findBinaryMetamethod(av, bv, (mmName)); \
+    if (!IS_NIL(_h)) { \
+        Value* _scratch = FRAME.slots + FRAME.closure->function->maxRegs; \
+        Value _res; \
+        if (!callBinaryMetamethod(_h, av, bv, _scratch, &_res)) \
+            return INTERPRET_RUNTIME_ERROR; \
+        REG_SET(GET_A(inst), _res); \
+        DISPATCH_POLL(); \
+    } \
+} while (0)
+#else
+#define TRY_BINARY_META(mmName) do {} while (0)
+#endif
 
 #define BINARY_OP(op)                                                \
     do                                                               \
@@ -317,12 +423,14 @@ static InterpretResult run()
         [OP_INT_EQUAL] = &&OP_INT_EQUAL,
         [OP_INT_NEGATE] = &&OP_INT_NEGATE,
         [OP_INT_INCREMENT] = &&OP_INT_INCREMENT,
+        [OP_INT_MODULO] = &&OP_INT_MODULO,
         [OP_INT_JLT] = &&OP_INT_JLT,
         [OP_INT_JLE] = &&OP_INT_JLE,
         [OP_INT_JGT] = &&OP_INT_JGT,
         [OP_INT_JGE] = &&OP_INT_JGE,
         [OP_INT_JE] = &&OP_INT_JE,
         [OP_NOT_EQUAL] = &&OP_NOT_EQUAL,
+        [OP_SQRT]      = &&OP_SQRT,
     };
 
     uint32_t instruction;
@@ -362,7 +470,7 @@ static InterpretResult run()
                 REG(GET_A(instruction)) = constant;
             }
 #ifdef __GNUC__
-            GC_STEP(); instruction = READ_INST(); goto *dispatch[GET_OP(instruction)];
+            DISPATCH_POLL();
 #else
             break;
 #endif
@@ -434,11 +542,12 @@ static InterpretResult run()
                 chars[length] = '\0';
                 REG_SET(GET_A(inst), OBJ_VAL(takeString(chars, length)));
             } else {
+                TRY_BINARY_META(vm.mmAdd);
                 runtimeError("Operands must be numbers or strings.");
                 return INTERPRET_RUNTIME_ERROR;
             }
 #ifdef __GNUC__
-            GC_STEP(); instruction = READ_INST(); goto *dispatch[GET_OP(instruction)];
+            DISPATCH_POLL();
 #else
             break;
 #endif
@@ -464,10 +573,11 @@ static InterpretResult run()
                 double db = IS_INTEGER(bv) ? (double)AS_INTEGER(bv) : valueToNumber(bv);
                 REG_SET(GET_A(inst), NUMBER_VAL(da - db));
             } else {
+                TRY_BINARY_META(vm.mmSub);
                 runtimeError("Operands must be numbers.");
                 return INTERPRET_RUNTIME_ERROR;
             }
-            GC_STEP(); instruction = READ_INST(); goto *dispatch[GET_OP(instruction)];
+            DISPATCH_POLL();
         }
 
         OP_MULTIPLY:
@@ -489,15 +599,29 @@ static InterpretResult run()
                 double db = IS_INTEGER(bv) ? (double)AS_INTEGER(bv) : valueToNumber(bv);
                 REG_SET(GET_A(inst), NUMBER_VAL(da * db));
             } else {
+                TRY_BINARY_META(vm.mmMul);
                 runtimeError("Operands must be numbers.");
                 return INTERPRET_RUNTIME_ERROR;
             }
-            GC_STEP(); instruction = READ_INST(); goto *dispatch[GET_OP(instruction)];
+            DISPATCH_POLL();
         }
 
         OP_DIVIDE:
-        BINARY_OP(/);
-        GC_STEP(); instruction = READ_INST(); goto *dispatch[GET_OP(instruction)];
+        {
+            uint32_t inst = FRAME.ip[-1];
+            Value bv = REG(GET_C(inst));
+            Value av = REG(GET_B(inst));
+            if (IS_NUMERIC(av) && IS_NUMERIC(bv)) {
+                double da = IS_INTEGER(av) ? (double)AS_INTEGER(av) : valueToNumber(av);
+                double db = IS_INTEGER(bv) ? (double)AS_INTEGER(bv) : valueToNumber(bv);
+                REG_SET(GET_A(inst), NUMBER_VAL(da / db));
+            } else {
+                TRY_BINARY_META(vm.mmDiv);
+                runtimeError("Operands must be numbers.");
+                return INTERPRET_RUNTIME_ERROR;
+            }
+            DISPATCH_POLL();
+        }
 
         OP_MODULO:
 #else
@@ -567,7 +691,7 @@ static InterpretResult run()
                 return INTERPRET_RUNTIME_ERROR;
             }
 #ifdef __GNUC__
-            GC_STEP(); instruction = READ_INST(); goto *dispatch[GET_OP(instruction)];
+            DISPATCH_POLL();
 #else
             break;
 #endif
@@ -596,7 +720,7 @@ static InterpretResult run()
             }
             REG(GET_A(inst)) = BOOL_VAL(equal);
 #ifdef __GNUC__
-            GC_STEP(); instruction = READ_INST(); goto *dispatch[GET_OP(instruction)];
+            DISPATCH();
 #else
             break;
 #endif
@@ -625,7 +749,7 @@ static InterpretResult run()
             }
             REG(GET_A(inst)) = BOOL_VAL(!equal);
 #ifdef __GNUC__
-            GC_STEP(); instruction = READ_INST(); goto *dispatch[GET_OP(instruction)];
+            DISPATCH();
 #else
             break;
 #endif
@@ -649,7 +773,7 @@ static InterpretResult run()
                 return INTERPRET_RUNTIME_ERROR;
             }
 #ifdef __GNUC__
-            GC_STEP(); instruction = READ_INST(); goto *dispatch[GET_OP(instruction)];
+            DISPATCH();
 #else
             break;
 #endif
@@ -673,7 +797,7 @@ static InterpretResult run()
                 return INTERPRET_RUNTIME_ERROR;
             }
 #ifdef __GNUC__
-            GC_STEP(); instruction = READ_INST(); goto *dispatch[GET_OP(instruction)];
+            DISPATCH();
 #else
             break;
 #endif
@@ -697,7 +821,7 @@ static InterpretResult run()
                 return INTERPRET_RUNTIME_ERROR;
             }
 #ifdef __GNUC__
-            GC_STEP(); instruction = READ_INST(); goto *dispatch[GET_OP(instruction)];
+            DISPATCH();
 #else
             break;
 #endif
@@ -721,7 +845,7 @@ static InterpretResult run()
                 return INTERPRET_RUNTIME_ERROR;
             }
 #ifdef __GNUC__
-            GC_STEP(); instruction = READ_INST(); goto *dispatch[GET_OP(instruction)];
+            DISPATCH();
 #else
             break;
 #endif
@@ -743,7 +867,7 @@ static InterpretResult run()
             }
             REG(GET_A(inst)) = BOOL_VAL(result);
 #ifdef __GNUC__
-            GC_STEP(); instruction = READ_INST(); goto *dispatch[GET_OP(instruction)];
+            DISPATCH();
 #else
             break;
 #endif
@@ -758,7 +882,7 @@ static InterpretResult run()
             ObjTable* table = newTable();
             REG(GET_A(instruction)) = OBJ_VAL(table);
 #ifdef __GNUC__
-            GC_STEP(); instruction = READ_INST(); goto *dispatch[GET_OP(instruction)];
+            DISPATCH_POLL();
 #else
             break;
 #endif
@@ -773,7 +897,9 @@ static InterpretResult run()
             uint8_t dest = GET_A(instruction);
             uint8_t src = GET_B(instruction);
             Value val = REG(src);
-            if (IS_TABLE(val)) {
+            if (IS_STRING(val)) {
+                REG_SET(dest, INTEGER_VAL(AS_STRING(val)->length));
+            } else if (IS_TABLE(val)) {
                 ObjTable* table = AS_TABLE(val);
                 if (table->metatable != NULL) {
                     ObjTable* mt = table->metatable;
@@ -796,7 +922,7 @@ static InterpretResult run()
                 return INTERPRET_RUNTIME_ERROR;
             }
 #ifdef __GNUC__
-            GC_STEP(); instruction = READ_INST(); goto *dispatch[GET_OP(instruction)];
+            DISPATCH_POLL();
 #else
             break;
 #endif
@@ -818,6 +944,9 @@ static InterpretResult run()
             }
             ObjTable* table = AS_TABLE(tableVal);
             if (IS_TABLE(mtVal)) {
+                // Write barrier: attaching a (possibly white) metatable to an
+                // already-black table would otherwise let it be swept.
+                gcWriteBarrier(mtVal);
                 table->metatable = AS_TABLE(mtVal);
             } else if (IS_NIL(mtVal)) {
                 table->metatable = NULL;
@@ -826,7 +955,7 @@ static InterpretResult run()
                 return INTERPRET_RUNTIME_ERROR;
             }
 #ifdef __GNUC__
-            GC_STEP(); instruction = READ_INST(); goto *dispatch[GET_OP(instruction)];
+            DISPATCH();
 #else
             break;
 #endif
@@ -853,7 +982,7 @@ static InterpretResult run()
                 return INTERPRET_RUNTIME_ERROR;
             }
 #ifdef __GNUC__
-            GC_STEP(); instruction = READ_INST(); goto *dispatch[GET_OP(instruction)];
+            DISPATCH();
 #else
             break;
 #endif
@@ -871,18 +1000,16 @@ static InterpretResult run()
             Value tableVal = REG(tableReg);
             Value keyVal = REG(keyReg);
 
-            // Inline cache check
+            // Inline cache check (per-chunk, indexed by instruction position)
             Chunk* chunk = &FRAME.closure->function->chunk;
             int instIdx = (int)(FRAME.ip - 1 - chunk->code);
-            int icIdx = instIdx & (IC_SIZE - 1);
-            InlineCache* ic = &vm.inlineCache[icIdx];
-            if (ic->valid && ic->chunk == chunk && ic->instOffset == instIdx &&
-                ic->table == tableVal && ic->key == keyVal)
+            InlineCache* ic = &chunk->caches[instIdx];
+            if (ic->valid && ic->table == tableVal && ic->key == keyVal)
             {
                 if (ic->tableGen == AS_TABLE(tableVal)->writeGen) {
                     REG_SET(dest, ic->result);
 #ifdef __GNUC__
-                    GC_STEP(); instruction = READ_INST(); goto *dispatch[GET_OP(instruction)];
+                    DISPATCH_POLL();
 #else
                     break;
 #endif
@@ -957,14 +1084,12 @@ static InterpretResult run()
 
             REG_SET(dest, result);
             ic->valid = true;
-            ic->chunk = chunk;
-            ic->instOffset = instIdx;
             ic->table = tableVal;
             ic->tableGen = table->writeGen;
             ic->key = keyVal;
             ic->result = result;
 #ifdef __GNUC__
-            GC_STEP(); instruction = READ_INST(); goto *dispatch[GET_OP(instruction)];
+            DISPATCH_POLL();
 #else
             break;
 #endif
@@ -1036,7 +1161,7 @@ static InterpretResult run()
                             tableSet(&target->fields, keyVal, value);
                         }
 #ifdef __GNUC__
-                        GC_STEP(); instruction = READ_INST(); goto *dispatch[GET_OP(instruction)];
+                        DISPATCH_POLL();
 #else
                         break;
 #endif
@@ -1078,7 +1203,7 @@ static InterpretResult run()
                 return INTERPRET_RUNTIME_ERROR;
             }
 #ifdef __GNUC__
-            GC_STEP(); instruction = READ_INST(); goto *dispatch[GET_OP(instruction)];
+            DISPATCH_POLL();
 #else
             break;
 #endif
@@ -1093,7 +1218,7 @@ static InterpretResult run()
             uint16_t offset = GET_Bx(instruction);
             FRAME.ip += offset;
 #ifdef __GNUC__
-            GC_STEP(); instruction = READ_INST(); goto *dispatch[GET_OP(instruction)];
+            DISPATCH_POLL();
 #else
             break;
 #endif
@@ -1108,7 +1233,7 @@ static InterpretResult run()
             int16_t offset = (int16_t)GET_Bx(instruction);
             FRAME.ip += offset;
 #ifdef __GNUC__
-            GC_STEP(); instruction = READ_INST(); goto *dispatch[GET_OP(instruction)];
+            DISPATCH_POLL();
 #else
             break;
 #endif
@@ -1130,7 +1255,7 @@ static InterpretResult run()
                 return INTERPRET_RUNTIME_ERROR;
             }
 #ifdef __GNUC__
-            GC_STEP(); instruction = READ_INST(); goto *dispatch[GET_OP(instruction)];
+            DISPATCH();
 #else
             break;
 #endif
@@ -1153,7 +1278,7 @@ static InterpretResult run()
             REG(GET_A(instruction)) = NUMBER_VAL(ts.tv_sec + ts.tv_nsec / 1e9);
 #endif
 #ifdef __GNUC__
-            GC_STEP(); instruction = READ_INST(); goto *dispatch[GET_OP(instruction)];
+            DISPATCH_POLL();
 #else
             break;
 #endif
@@ -1176,7 +1301,7 @@ static InterpretResult run()
                 return INTERPRET_RUNTIME_ERROR;
             }
 #ifdef __GNUC__
-            GC_STEP(); instruction = READ_INST(); goto *dispatch[GET_OP(instruction)];
+            DISPATCH();
 #else
             break;
 #endif
@@ -1192,7 +1317,7 @@ static InterpretResult run()
             printf("\n");
             fflush(stdout);
 #ifdef __GNUC__
-            GC_STEP(); instruction = READ_INST(); goto *dispatch[GET_OP(instruction)];
+            DISPATCH_POLL();
 #else
             break;
 #endif
@@ -1207,7 +1332,7 @@ static InterpretResult run()
             ObjString *name = AS_STRING(READ_CONSTANT(instruction));
             tableSet(&vm.globals, OBJ_VAL((Obj*)name), REG(GET_A(instruction)));
 #ifdef __GNUC__
-            GC_STEP(); instruction = READ_INST(); goto *dispatch[GET_OP(instruction)];
+            DISPATCH_POLL();
 #else
             break;
 #endif
@@ -1220,15 +1345,27 @@ static InterpretResult run()
 #endif
         {
             ObjString *name = AS_STRING(READ_CONSTANT(instruction));
-            Value value;
-            if (!tableGet(&vm.globals, OBJ_VAL((Obj*)name), &value))
+            GlobalCacheEntry* gc = &vm.globalCache[(name->hash) & (GLOBAL_CACHE_SIZE - 1)];
+            if (gc->name == name && gc->generation == vm.globals.generation) {
+                REG(GET_A(instruction)) = gc->entry->value;
+#ifdef __GNUC__
+                DISPATCH_POLL();
+#else
+                break;
+#endif
+            }
+            Entry* entry = tableGetEntry(&vm.globals, OBJ_VAL((Obj*)name));
+            if (entry == NULL)
             {
                 runtimeError("Undefined variable '%s'.", name->chars);
                 return INTERPRET_RUNTIME_ERROR;
             }
-            REG(GET_A(instruction)) = value;
+            gc->name = name;
+            gc->generation = vm.globals.generation;
+            gc->entry = entry;
+            REG(GET_A(instruction)) = entry->value;
 #ifdef __GNUC__
-            GC_STEP(); instruction = READ_INST(); goto *dispatch[GET_OP(instruction)];
+            DISPATCH_POLL();
 #else
             break;
 #endif
@@ -1241,14 +1378,30 @@ static InterpretResult run()
 #endif
         {
             ObjString *name = AS_STRING(READ_CONSTANT(instruction));
-            if (tableSet(&vm.globals, OBJ_VAL((Obj*)name), REG(GET_A(instruction))))
+            Value newVal = REG(GET_A(instruction));
+            GlobalCacheEntry* gc = &vm.globalCache[(name->hash) & (GLOBAL_CACHE_SIZE - 1)];
+            if (gc->name == name && gc->generation == vm.globals.generation) {
+                gc->entry->value = newVal;
+                gcWriteBarrier(newVal);
+#ifdef __GNUC__
+                DISPATCH_POLL();
+#else
+                break;
+#endif
+            }
+            Entry* entry = tableGetEntry(&vm.globals, OBJ_VAL((Obj*)name));
+            if (entry == NULL)
             {
-                tableDelete(&vm.globals, OBJ_VAL((Obj*)name));
                 runtimeError("Undefined variable '%s'.", name->chars);
                 return INTERPRET_RUNTIME_ERROR;
             }
+            gc->name = name;
+            gc->generation = vm.globals.generation;
+            gc->entry = entry;
+            entry->value = newVal;
+            gcWriteBarrier(newVal);
 #ifdef __GNUC__
-            GC_STEP(); instruction = READ_INST(); goto *dispatch[GET_OP(instruction)];
+            DISPATCH_POLL();
 #else
             break;
 #endif
@@ -1264,7 +1417,7 @@ static InterpretResult run()
             uint8_t slot = GET_B(instruction);
             REG_SET(reg, *FRAME.closure->upvalues[slot]->location);
 #ifdef __GNUC__
-            GC_STEP(); instruction = READ_INST(); goto *dispatch[GET_OP(instruction)];
+            DISPATCH();
 #else
             break;
 #endif
@@ -1280,7 +1433,7 @@ static InterpretResult run()
             uint8_t slot = GET_B(instruction);
             REG_SET(reg, FRAME.closure->readonlyValues[slot]);
 #ifdef __GNUC__
-            GC_STEP(); instruction = READ_INST(); goto *dispatch[GET_OP(instruction)];
+            DISPATCH();
 #else
             break;
 #endif
@@ -1297,7 +1450,7 @@ static InterpretResult run()
             GC_WRITE_BARRIER(upvVal);
             *FRAME.closure->upvalues[slot]->location = upvVal;
 #ifdef __GNUC__
-            GC_STEP(); instruction = READ_INST(); goto *dispatch[GET_OP(instruction)];
+            DISPATCH();
 #else
             break;
 #endif
@@ -1317,12 +1470,13 @@ static InterpretResult run()
             GC_WRITE_BARRIER(result);
 
             vm.frameCount--;
-            if (vm.frameCount == 0)
+            if (vm.frameCount == baseFrame)
             {
                 return INTERPRET_OK;
             }
+            RELOAD_FRAME();
 #ifdef __GNUC__
-            GC_STEP(); instruction = READ_INST(); goto *dispatch[GET_OP(instruction)];
+            DISPATCH_POLL();
 #else
             break;
 #endif
@@ -1338,7 +1492,7 @@ static InterpretResult run()
             uint8_t src = GET_B(instruction);
             REG_SET(dest, REG(src));
 #ifdef __GNUC__
-            GC_STEP(); instruction = READ_INST(); goto *dispatch[GET_OP(instruction)];
+            DISPATCH();
 #else
             break;
 #endif
@@ -1352,7 +1506,7 @@ static InterpretResult run()
         {
             REG(GET_A(instruction)) = BOOL_VAL(true);
 #ifdef __GNUC__
-            GC_STEP(); instruction = READ_INST(); goto *dispatch[GET_OP(instruction)];
+            DISPATCH();
 #else
             break;
 #endif
@@ -1366,7 +1520,7 @@ static InterpretResult run()
         {
             REG(GET_A(instruction)) = BOOL_VAL(false);
 #ifdef __GNUC__
-            GC_STEP(); instruction = READ_INST(); goto *dispatch[GET_OP(instruction)];
+            DISPATCH();
 #else
             break;
 #endif
@@ -1380,7 +1534,7 @@ static InterpretResult run()
         {
             REG(GET_A(instruction)) = NIL_VAL;
 #ifdef __GNUC__
-            GC_STEP(); instruction = READ_INST(); goto *dispatch[GET_OP(instruction)];
+            DISPATCH();
 #else
             break;
 #endif
@@ -1395,7 +1549,7 @@ static InterpretResult run()
             int16_t offset = (int16_t)GET_Bx(instruction);
             FRAME.ip += offset;
 #ifdef __GNUC__
-            GC_STEP(); instruction = READ_INST(); goto *dispatch[GET_OP(instruction)];
+            DISPATCH_POLL();
 #else
             break;
 #endif
@@ -1415,7 +1569,7 @@ static InterpretResult run()
                 FRAME.ip += offset;
             }
 #ifdef __GNUC__
-            GC_STEP(); instruction = READ_INST(); goto *dispatch[GET_OP(instruction)];
+            DISPATCH_POLL();
 #else
             break;
 #endif
@@ -1428,7 +1582,7 @@ static InterpretResult run()
 #endif
         {
 #ifdef __GNUC__
-            GC_STEP(); instruction = READ_INST(); goto *dispatch[GET_OP(instruction)];
+            DISPATCH();
 #else
             break;
 #endif
@@ -1444,7 +1598,7 @@ static InterpretResult run()
             int64_t cv = AS_INTEGER(REG(GET_C(instruction)));
             STORE_INT(GET_A(instruction), bv + cv);
 #ifdef __GNUC__
-            GC_STEP(); instruction = READ_INST(); goto *dispatch[GET_OP(instruction)];
+            DISPATCH();
 #else
             break;
 #endif
@@ -1460,7 +1614,7 @@ static InterpretResult run()
             int64_t cv = AS_INTEGER(REG(GET_C(instruction)));
             STORE_INT(GET_A(instruction), bv - cv);
 #ifdef __GNUC__
-            GC_STEP(); instruction = READ_INST(); goto *dispatch[GET_OP(instruction)];
+            DISPATCH();
 #else
             break;
 #endif
@@ -1476,7 +1630,7 @@ static InterpretResult run()
             int64_t cv = AS_INTEGER(REG(GET_C(instruction)));
             STORE_INT(GET_A(instruction), bv * cv);
 #ifdef __GNUC__
-            GC_STEP(); instruction = READ_INST(); goto *dispatch[GET_OP(instruction)];
+            DISPATCH();
 #else
             break;
 #endif
@@ -1492,7 +1646,7 @@ static InterpretResult run()
                 AS_INTEGER(REG(GET_B(instruction))) <
                 AS_INTEGER(REG(GET_C(instruction))));
 #ifdef __GNUC__
-            GC_STEP(); instruction = READ_INST(); goto *dispatch[GET_OP(instruction)];
+            DISPATCH();
 #else
             break;
 #endif
@@ -1508,7 +1662,7 @@ static InterpretResult run()
                 AS_INTEGER(REG(GET_B(instruction))) >
                 AS_INTEGER(REG(GET_C(instruction))));
 #ifdef __GNUC__
-            GC_STEP(); instruction = READ_INST(); goto *dispatch[GET_OP(instruction)];
+            DISPATCH();
 #else
             break;
 #endif
@@ -1524,7 +1678,7 @@ static InterpretResult run()
                 AS_INTEGER(REG(GET_B(instruction))) <=
                 AS_INTEGER(REG(GET_C(instruction))));
 #ifdef __GNUC__
-            GC_STEP(); instruction = READ_INST(); goto *dispatch[GET_OP(instruction)];
+            DISPATCH();
 #else
             break;
 #endif
@@ -1540,7 +1694,7 @@ static InterpretResult run()
                 AS_INTEGER(REG(GET_B(instruction))) >=
                 AS_INTEGER(REG(GET_C(instruction))));
 #ifdef __GNUC__
-            GC_STEP(); instruction = READ_INST(); goto *dispatch[GET_OP(instruction)];
+            DISPATCH();
 #else
             break;
 #endif
@@ -1556,7 +1710,7 @@ static InterpretResult run()
                 AS_INTEGER(REG(GET_B(instruction))) ==
                 AS_INTEGER(REG(GET_C(instruction))));
 #ifdef __GNUC__
-            GC_STEP(); instruction = READ_INST(); goto *dispatch[GET_OP(instruction)];
+            DISPATCH();
 #else
             break;
 #endif
@@ -1572,7 +1726,7 @@ static InterpretResult run()
                 FRAME.ip += (int8_t)GET_C(instruction);
             }
 #ifdef __GNUC__
-            GC_STEP(); instruction = READ_INST(); goto *dispatch[GET_OP(instruction)];
+            DISPATCH_POLL();
 #else
             break;
 #endif
@@ -1588,7 +1742,7 @@ static InterpretResult run()
                 FRAME.ip += (int8_t)GET_C(instruction);
             }
 #ifdef __GNUC__
-            GC_STEP(); instruction = READ_INST(); goto *dispatch[GET_OP(instruction)];
+            DISPATCH_POLL();
 #else
             break;
 #endif
@@ -1604,7 +1758,7 @@ static InterpretResult run()
                 FRAME.ip += (int8_t)GET_C(instruction);
             }
 #ifdef __GNUC__
-            GC_STEP(); instruction = READ_INST(); goto *dispatch[GET_OP(instruction)];
+            DISPATCH_POLL();
 #else
             break;
 #endif
@@ -1620,7 +1774,7 @@ static InterpretResult run()
                 FRAME.ip += (int8_t)GET_C(instruction);
             }
 #ifdef __GNUC__
-            GC_STEP(); instruction = READ_INST(); goto *dispatch[GET_OP(instruction)];
+            DISPATCH_POLL();
 #else
             break;
 #endif
@@ -1636,7 +1790,7 @@ static InterpretResult run()
                 FRAME.ip += (int8_t)GET_C(instruction);
             }
 #ifdef __GNUC__
-            GC_STEP(); instruction = READ_INST(); goto *dispatch[GET_OP(instruction)];
+            DISPATCH_POLL();
 #else
             break;
 #endif
@@ -1651,7 +1805,7 @@ static InterpretResult run()
             STORE_INT(GET_A(instruction),
                 -AS_INTEGER(REG(GET_B(instruction))));
 #ifdef __GNUC__
-            GC_STEP(); instruction = READ_INST(); goto *dispatch[GET_OP(instruction)];
+            DISPATCH();
 #else
             break;
 #endif
@@ -1666,7 +1820,53 @@ static InterpretResult run()
             STORE_INT(GET_A(instruction),
                 AS_INTEGER(REG(GET_A(instruction))) + 1);
 #ifdef __GNUC__
-            GC_STEP(); instruction = READ_INST(); goto *dispatch[GET_OP(instruction)];
+            DISPATCH();
+#else
+            break;
+#endif
+        }
+
+#ifdef __GNUC__
+        OP_INT_MODULO:
+#else
+        case OP_INT_MODULO:
+#endif
+        {
+            int64_t ib = AS_INTEGER(REG(GET_C(instruction)));
+            if (ib == 0) {
+                runtimeError("Division by zero.");
+                return INTERPRET_RUNTIME_ERROR;
+            }
+            int64_t ia = AS_INTEGER(REG(GET_B(instruction)));
+            if (ia == INT64_MIN && ib == -1) {
+                REG(GET_A(instruction)) = INTEGER_VAL(0);
+            } else {
+                STORE_INT(GET_A(instruction), ia % ib);
+            }
+#ifdef __GNUC__
+            DISPATCH();
+#else
+            break;
+#endif
+        }
+
+#ifdef __GNUC__
+        OP_SQRT:
+#else
+        case OP_SQRT:
+#endif
+        {
+            Value v = REG(GET_B(instruction));
+            if (IS_INTEGER(v)) {
+                REG_SET(GET_A(instruction), NUMBER_VAL(sqrt((double)AS_INTEGER(v))));
+            } else if (IS_NUMBER(v)) {
+                REG_SET(GET_A(instruction), NUMBER_VAL(sqrt(AS_NUMBER(v))));
+            } else {
+                runtimeError("Operand must be a number.");
+                return INTERPRET_RUNTIME_ERROR;
+            }
+#ifdef __GNUC__
+            DISPATCH();
 #else
             break;
 #endif
@@ -1680,7 +1880,7 @@ static InterpretResult run()
         {
             REG(GET_A(instruction)) = NIL_VAL;
 #ifdef __GNUC__
-            GC_STEP(); instruction = READ_INST(); goto *dispatch[GET_OP(instruction)];
+            DISPATCH();
 #else
             break;
 #endif
@@ -1707,6 +1907,21 @@ static InterpretResult run()
                  for (int i = 0; i < function->upvalueCount; i++) {
                      closure->upvalues[i] = NULL;
                  }
+             } else if (IS_NATIVE(callee)) {
+                 ObjNative* native = AS_NATIVE(callee);
+                 if (native->arity >= 0 && argCount != native->arity) {
+                     runtimeError("Expected %d arguments but got %d.",
+                                  native->arity, argCount);
+                     return INTERPRET_RUNTIME_ERROR;
+                 }
+                 Value result;
+                 native->function(argCount, &REG(reg + 1), &result);
+                 REG_SET(reg, result);
+#ifdef __GNUC__
+                 DISPATCH_POLL();
+#else
+                 break;
+#endif
              } else if (IS_TABLE(callee)) {
                  ObjTable* table = AS_TABLE(callee);
                   if (table->metatable != NULL) {
@@ -1761,8 +1976,9 @@ static InterpretResult run()
              nextFrame->slots = &REG(reg);
 
              vm.frameCount++;
+             RELOAD_FRAME();
 #ifdef __GNUC__
-            GC_STEP(); instruction = READ_INST(); goto *dispatch[GET_OP(instruction)];
+            DISPATCH_POLL();
 #else
             break;
 #endif
@@ -1798,7 +2014,7 @@ static InterpretResult run()
                 }
             }
 #ifdef __GNUC__
-            GC_STEP(); instruction = READ_INST(); goto *dispatch[GET_OP(instruction)];
+            DISPATCH_POLL();
 #else
             break;
 #endif
@@ -1813,6 +2029,7 @@ static InterpretResult run()
 #endif
 
 #undef READ_INST
+#undef RELOAD_FRAME
 #undef READ_CONSTANT
 #undef REG
 #undef FRAME
@@ -1831,5 +2048,5 @@ InterpretResult interpret(const char *source)
     vm.frames[0].slots = vm.stack;
     vm.frames[0].ip = closure->function->chunk.code;
 
-    return run();
+    return run(0);
 }

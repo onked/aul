@@ -10,12 +10,21 @@ typedef enum {
     OBJ_FUNCTION,
     OBJ_CLOSURE,
     OBJ_UPVALUE,
-    OBJ_TABLE
+    OBJ_TABLE,
+    OBJ_NATIVE
 } ObjType;
+
+typedef void (*NativeFn)(int argCount, Value* args, Value* result);
+
+#define GC_COLOR_WHITE0  0
+#define GC_COLOR_WHITE1  1
+#define GC_COLOR_BLACK   2
+#define GC_COLOR_GRAY    3
+#define GC_COLOR_MASK    3
 
 struct Obj {
     ObjType type;
-    bool marked;
+    uint8_t marked;
     struct Obj* next;
 };
 
@@ -50,10 +59,15 @@ typedef struct {
     int upvalueCount;
 } ObjClosure;
 
+#define TABLE_INLINE_CAPACITY 4
+
 typedef struct ObjTable {
     Obj obj;
     int arrayCapacity;
     Value* array;
+    int inlineCount;
+    Value inlineKeys[TABLE_INLINE_CAPACITY];
+    Value inlineVals[TABLE_INLINE_CAPACITY];
     Table fields;
     struct ObjTable* metatable;
     uint32_t writeGen;
@@ -62,7 +76,15 @@ typedef struct ObjTable {
     Value cachedNewIndex;
     Value cachedCall;
     Value cachedLen;
+    struct ObjTable* gclist;
 } ObjTable;
+
+typedef struct {
+    Obj obj;
+    NativeFn function;
+    ObjString* name;
+    int arity;
+} ObjNative;
 
 struct ObjString {
     Obj obj;
@@ -76,18 +98,21 @@ struct ObjString {
 #define IS_FUNCTION(value)  isObjType(value, OBJ_FUNCTION)
 #define IS_CLOSURE(value)   isObjType(value, OBJ_CLOSURE)
 #define IS_TABLE(value)     isObjType(value, OBJ_TABLE)
+#define IS_NATIVE(value)    isObjType(value, OBJ_NATIVE)
 
 #define AS_CSTRING(value)   (((ObjString*)AS_OBJ(value))->chars)
 #define AS_STRING(value)    ((ObjString*)AS_OBJ(value))
 #define AS_FUNCTION(value)  ((ObjFunction*)AS_OBJ(value))
 #define AS_CLOSURE(value)   ((ObjClosure*)AS_OBJ(value))
 #define AS_TABLE(value)     ((ObjTable*)AS_OBJ(value))
+#define AS_NATIVE(value)    ((ObjNative*)AS_OBJ(value))
 
 static inline bool isObjType(Value value, ObjType type) {
     return IS_OBJ(value) && AS_OBJ(value)->type == type;
 }
 
 ObjFunction* newFunction();
+ObjNative* newNative(const char* name, NativeFn function, int arity);
 ObjClosure* newClosure(ObjFunction* function);
 ObjUpvalue* newUpvalue(Value* slot);
 ObjTable* newTable();

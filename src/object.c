@@ -11,12 +11,21 @@
 static Obj* allocateObject(size_t size, ObjType type) {
     Obj* object = (Obj*)reallocate(NULL, 0, size);
     object->type = type;
-    object->marked = false;
-    object->next = vm.objects;
-    vm.objects = object;
+    object->marked = vm.currentWhite;
+    object->next = NULL;
 
-    if (vm.gcPhase != GC_PHASE_IDLE) {
-        markObject(object);
+    // Objects born during SWEEP are inserted into newObjects so the in-flight
+    // sweep cannot free them (they would carry a stale white that matches the
+    // sweep's otherWhite). They are spliced into the main list on completion.
+    if (vm.gcPhase == GC_PHASE_SWEEP) {
+        object->next = vm.newObjects;
+        vm.newObjects = object;
+    } else {
+        object->next = vm.objects;
+        vm.objects = object;
+        if (vm.gcPhase == GC_PHASE_MARK || vm.gcPhase == GC_PHASE_ATOMIC) {
+            markObject(object);
+        }
     }
 
     return object;
@@ -30,6 +39,14 @@ ObjFunction* newFunction() {
     function->name = NULL;
     initChunk(&function->chunk);
     return function;
+}
+
+ObjNative* newNative(const char* name, NativeFn function, int arity) {
+    ObjNative* native = (ObjNative*)allocateObject(sizeof(ObjNative), OBJ_NATIVE);
+    native->function = function;
+    native->name = copyString(name, strlen(name));
+    native->arity = arity;
+    return native;
 }
 
 ObjClosure* newClosure(ObjFunction* function) {
@@ -59,6 +76,11 @@ ObjTable* newTable() {
     ObjTable* table = (ObjTable*)allocateObject(sizeof(ObjTable), OBJ_TABLE);
     table->arrayCapacity = 0;
     table->array = NULL;
+    table->inlineCount = 0;
+    for (int i = 0; i < TABLE_INLINE_CAPACITY; i++) {
+        table->inlineKeys[i] = NIL_VAL;
+        table->inlineVals[i] = NIL_VAL;
+    }
     initTable(&table->fields);
     table->metatable = NULL;
     table->writeGen = 0;

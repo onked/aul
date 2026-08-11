@@ -74,7 +74,16 @@ void specializeTypes(Chunk* chunk) {
                 }
                 break;
 
-            case OP_DIVIDE: case OP_MODULO:
+            case OP_MODULO:
+                if (isInt[b] && isInt[c]) {
+                    chunk->code[i] = CREATE_ABC(OP_INT_MODULO, a, b, c);
+                    isInt[a] = 1;
+                } else {
+                    isInt[a] = 0;
+                }
+                break;
+
+            case OP_DIVIDE:
                 isInt[a] = 0;
                 break;
 
