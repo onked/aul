@@ -67,6 +67,7 @@ static bool instReadsReg(uint32_t inst, uint8_t reg) {
         case OP_GREATER_EQUAL: case OP_LESS_EQUAL:
         case OP_GET_TABLE: case OP_SET_TABLE:
         case OP_INT_ADD: case OP_INT_SUBTRACT: case OP_INT_MULTIPLY:
+        case OP_INT_MODULO:
         case OP_INT_LESS: case OP_INT_GREATER:
         case OP_INT_LESS_EQUAL: case OP_INT_GREATER_EQUAL:
         case OP_INT_EQUAL:

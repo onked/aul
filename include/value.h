@@ -16,7 +16,6 @@ typedef uint64_t Value;
 #define FALSE_VAL (QNAN_TAG | 0x1ULL)
 #define TRUE_VAL  (QNAN_TAG | 0x2ULL)
 
-// Integer tag: lower 3 bits = 101, stores int64_t in bits 3-50 (48-bit signed payload)
 #define INT_TAG    0x5ULL
 #define INT_DATA_MASK  0x0007FFFFFFFFFFFF8ULL
 #define INT48_MIN  (-(1LL << 47))

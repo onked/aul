@@ -15,14 +15,10 @@ void* reallocate(void* pointer, size_t oldSize, size_t newSize) {
         vm.bytesAllocated -= oldSize - newSize;
     }
 
-    if (!inCompilation && vm.bytesAllocated > vm.nextGC) {
-        if (vm.gcPhase == GC_PHASE_IDLE) {
-            vm.gcPhase = GC_PHASE_MARK_ROOTS;
-            vm.grayStack = NULL;
-            vm.grayCount = 0;
-            vm.grayCapacity = 0;
-            vm.sweepObj = NULL;
-        }
+    if (!inCompilation && vm.bytesAllocated > vm.nextGC
+        && vm.gcPhase == GC_PHASE_IDLE) {
+        vm.gcPhase = GC_PHASE_MARK;
+        markRoots();
     }
 
     if (newSize == 0) {

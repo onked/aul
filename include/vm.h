@@ -12,16 +12,13 @@
 #define GC_HEAP_GROW_FACTOR 2
 
 #define IC_SIZE 64
+#define GLOBAL_CACHE_SIZE 256
 
 typedef struct {
-    bool valid;
-    Chunk* chunk;
-    int instOffset;
-    Value table;
-    uint32_t tableGen;
-    Value key;
-    Value result;
-} InlineCache;
+    ObjString* name;
+    uint32_t generation;
+    Entry* entry;
+} GlobalCacheEntry;
 
 typedef struct {
     ObjClosure* closure;
@@ -30,14 +27,15 @@ typedef struct {
 } CallFrame;
 
 typedef enum {
-    GC_PHASE_MARK_ROOTS,
     GC_PHASE_MARK,
+    GC_PHASE_ATOMIC,
     GC_PHASE_SWEEP,
     GC_PHASE_IDLE
 } GCPhase;
 
 typedef struct {
     struct Obj* objects;
+    struct Obj* newObjects; // objects born during GC_PHASE_SWEEP; spliced in on completion
     // Array-based gray stack so we don't corrupt the vm.objects linked list
     struct Obj** grayStack;
     int grayCount;
@@ -55,18 +53,26 @@ typedef struct {
     Table strings;
     
     GCPhase gcPhase;
+    uint8_t currentWhite;
+    uint8_t otherWhite;
+    struct ObjTable* grayagain;
     size_t bytesAllocated;
     size_t nextGC;
     
     Obj* sweepObj;
+    Obj* sweepPrev;
     size_t marksPerStep;
 
     struct ObjString* mmIndex;
     struct ObjString* mmNewIndex;
     struct ObjString* mmCall;
     struct ObjString* mmLen;
+    struct ObjString* mmAdd;
+    struct ObjString* mmSub;
+    struct ObjString* mmMul;
+    struct ObjString* mmDiv;
 
-    InlineCache inlineCache[IC_SIZE];
+    GlobalCacheEntry globalCache[GLOBAL_CACHE_SIZE];
 } VM;
 
 typedef enum {
@@ -81,5 +87,6 @@ void initVM();
 void freeVM();
 InterpretResult interpret(const char* source);
 void gcStep(void);
+void barrierBack(struct Obj* obj);
 
 #endif

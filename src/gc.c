@@ -5,7 +5,7 @@
 #include "object.h"
 #include "table.h"
 
-static void growGrayStack() {
+void growGrayStack() {
     if (vm.grayCount >= vm.grayCapacity) {
         vm.grayCapacity = vm.grayCapacity == 0 ? 256 : vm.grayCapacity * 2;
         vm.grayStack = reallocate(vm.grayStack, sizeof(Obj*) * (vm.grayCount),
@@ -15,13 +15,9 @@ static void growGrayStack() {
 
 void markObject(Obj* object) {
     if (object == NULL) return;
-    if (object->marked) return;
+    if ((object->marked & GC_COLOR_MASK) != vm.currentWhite) return;
 
-#ifdef DEBUG_LOG_GC
-    printf("%p mark ", (void*)object);
-#endif
-
-    object->marked = true;
+    object->marked |= GC_COLOR_GRAY;
     growGrayStack();
     vm.grayStack[vm.grayCount++] = object;
 }
@@ -38,9 +34,7 @@ void markArray(ValueArray* array) {
 }
 
 void blackenObject(Obj* object) {
-#ifdef DEBUG_LOG_GC
-    printf("%p blacken ", (void*)object);
-#endif
+    object->marked = (object->marked & ~GC_COLOR_MASK) | GC_COLOR_BLACK;
 
     switch (object->type) {
     case OBJ_STRING:
@@ -64,7 +58,6 @@ void blackenObject(Obj* object) {
         break;
     }
     case OBJ_UPVALUE:
-        // Closed upvalues hold a Value directly
         markValue(((ObjUpvalue*)object)->closed);
         break;
     case OBJ_TABLE: {
@@ -75,7 +68,13 @@ void blackenObject(Obj* object) {
         for (int i = 0; i < table->arrayCapacity; i++) {
             markValue(table->array[i]);
         }
-        // Mark all hash part entries (keys and values)
+        if (table->inlineCount > 0) {
+            for (int i = 0; i < table->inlineCount; i++) {
+                if (!IS_NIL(table->inlineKeys[i])) {
+                    markValue(table->inlineKeys[i]);
+                }
+            }
+        }
         for (int i = 0; i < table->fields.capacity; i++) {
             Entry* entry = &table->fields.entries[i];
             if (!IS_NIL(entry->key)) {
@@ -83,25 +82,35 @@ void blackenObject(Obj* object) {
                 markValue(entry->value);
             }
         }
-        // Mark cached metamethod values
         markValue(table->cachedIndex);
         markValue(table->cachedNewIndex);
         markValue(table->cachedCall);
         markValue(table->cachedLen);
         break;
     }
+    case OBJ_NATIVE: {
+        ObjNative* native = (ObjNative*)object;
+        markObject((Obj*)native->name);
+        break;
+    }
+
     }
 }
 
-// Mark roots: in a register VM we scan each frame's register window,
-// not a single stack pointer
+void barrierBack(Obj* obj) {
+    if (obj == NULL || obj->type != OBJ_TABLE || (obj->marked & GC_COLOR_MASK) != GC_COLOR_BLACK) return;
+    obj->marked |= GC_COLOR_GRAY;
+    ObjTable* t = (ObjTable*)obj;
+    t->gclist = vm.grayagain;
+    vm.grayagain = t;
+}
+
 void markRoots() {
-    // Scan each call frame's register window
     for (int i = 0; i < vm.frameCount; i++) {
         CallFrame* frame = &vm.frames[i];
         markObject((Obj*)frame->closure);
         int regCount = frame->closure->function->maxRegs;
-        if (regCount == 0) regCount = 1; // safety: always scan at least slot 0
+        if (regCount == 0) regCount = 1;
         for (int r = 0; r < regCount; r++) {
             markValue(frame->slots[r]);
         }
@@ -123,15 +132,10 @@ void markRoots() {
     markObject((Obj*)vm.mmNewIndex);
     markObject((Obj*)vm.mmCall);
     markObject((Obj*)vm.mmLen);
-
-    for (int i = 0; i < IC_SIZE; i++) {
-        InlineCache* ic = &vm.inlineCache[i];
-        if (ic->valid) {
-            markValue(ic->table);
-            markValue(ic->key);
-            markValue(ic->result);
-        }
-    }
+    markObject((Obj*)vm.mmAdd);
+    markObject((Obj*)vm.mmSub);
+    markObject((Obj*)vm.mmMul);
+    markObject((Obj*)vm.mmDiv);
 
     for (int i = 0; i < vm.strings.capacity; i++) {
         Entry* entry = &vm.strings.entries[i];
@@ -152,11 +156,7 @@ void sweep() {
     Obj* previous = NULL;
     Obj* object = vm.objects;
     while (object != NULL) {
-        if (object->marked) {
-            object->marked = false;
-            previous = object;
-            object = object->next;
-        } else {
+        if ((object->marked & GC_COLOR_MASK) == vm.otherWhite) {
             Obj* unreached = object;
             object = object->next;
             if (previous != NULL) {
@@ -165,36 +165,43 @@ void sweep() {
                 vm.objects = object;
             }
             freeObject(unreached);
+        } else {
+            object->marked = (object->marked & ~GC_COLOR_MASK) | vm.currentWhite;
+            previous = object;
+            object = object->next;
         }
     }
 }
 
 void collectGarbage() {
-#ifdef DEBUG_LOG_GC
-    printf("-- gc begin\n");
-#endif
-
     markRoots();
-
-#ifdef DEBUG_LOG_GC
-    // Capture after markRoots (which may allocate gray stack)
-    size_t before = vm.bytesAllocated;
-#endif
-
     traceReferences();
+
+    while (vm.grayagain != NULL) {
+        ObjTable* t = vm.grayagain;
+        vm.grayagain = t->gclist;
+        t->gclist = NULL;
+        growGrayStack();
+        vm.grayStack[vm.grayCount++] = (Obj*)t;
+    }
+    traceReferences();
+
+    vm.otherWhite = vm.currentWhite;
+    vm.currentWhite ^= 1;
+
     sweep();
 
     vm.nextGC = vm.bytesAllocated * GC_HEAP_GROW_FACTOR;
+    vm.gcPhase = GC_PHASE_IDLE;
 
-    for (int i = 0; i < IC_SIZE; i++) {
-        vm.inlineCache[i].valid = false;
+    for (Obj* o = vm.objects; o != NULL; o = o->next) {
+        if (o->type == OBJ_FUNCTION) {
+            Chunk* c = &((ObjFunction*)o)->chunk;
+            for (int i = 0; i < c->count; i++) {
+                c->caches[i].valid = false;
+            }
+        }
     }
-
-#ifdef DEBUG_LOG_GC
-    printf("-- gc end\n");
-    printf("-- collected %zu bytes (from %zu to %zu) next at %zu\n",
-           before - vm.bytesAllocated, before, vm.bytesAllocated, vm.nextGC);
-#endif
 }
 
 void freeObject(Obj* object) {
@@ -205,11 +212,8 @@ void freeObject(Obj* object) {
     case OBJ_CLOSURE:  objSize = sizeof(ObjClosure);  break;
     case OBJ_UPVALUE:  objSize = sizeof(ObjUpvalue);  break;
     case OBJ_TABLE:    objSize = sizeof(ObjTable);    break;
+    case OBJ_NATIVE:   objSize = sizeof(ObjNative);   break;
     }
-
-#ifdef DEBUG_LOG_GC
-    printf("%p free type %d\n", (void*)object, object->type);
-#endif
 
     switch (object->type) {
     case OBJ_STRING: {
@@ -228,9 +232,8 @@ void freeObject(Obj* object) {
         reallocate(closure->readonlyValues, sizeof(Value) * closure->upvalueCount, 0);
         break;
     }
-    case OBJ_UPVALUE: {
+    case OBJ_UPVALUE:
         break;
-    }
     case OBJ_TABLE: {
         ObjTable* table = (ObjTable*)object;
         if (table->array != NULL) {
@@ -239,6 +242,8 @@ void freeObject(Obj* object) {
         freeTable(&table->fields);
         break;
     }
+    case OBJ_NATIVE:
+        break;
     }
 
     reallocate(object, objSize, 0);

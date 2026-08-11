@@ -8,6 +8,7 @@ void initChunk(Chunk* chunk) {
     chunk->capacity = 0;
     chunk->code = NULL;
     chunk->lines = NULL;
+    chunk->caches = NULL;
     initValueArray(&chunk->constants);
 }
 
@@ -19,6 +20,11 @@ void writeChunk(Chunk* chunk, uint32_t instruction, int line) {
                                  chunk->capacity * sizeof(uint32_t));
         chunk->lines = reallocate(chunk->lines, oldCapacity * sizeof(int),
                                   chunk->capacity * sizeof(int));
+        chunk->caches = reallocate(chunk->caches, oldCapacity * sizeof(InlineCache),
+                                   chunk->capacity * sizeof(InlineCache));
+        for (int i = oldCapacity; i < chunk->capacity; i++) {
+            chunk->caches[i].valid = false;
+        }
     }
     chunk->code[chunk->count] = instruction;
     chunk->lines[chunk->count] = line;
@@ -28,6 +34,7 @@ void writeChunk(Chunk* chunk, uint32_t instruction, int line) {
 void freeChunk(Chunk* chunk) {
     reallocate(chunk->code, sizeof(uint32_t) * chunk->capacity, 0);
     reallocate(chunk->lines, sizeof(int) * chunk->capacity, 0);
+    reallocate(chunk->caches, sizeof(InlineCache) * chunk->capacity, 0);
     freeValueArray(&chunk->constants);
     initChunk(chunk);
 }

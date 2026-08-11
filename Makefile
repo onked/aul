@@ -9,3 +9,11 @@ aul: $(SOURCES)
 aulfast: CFLAGS = -Wall -Wextra -O2 -Iinclude -Isrc/compiler
 aulfast: $(SOURCES)
 	$(CC) $(CFLAGS) $(SOURCES) -o aulfast.exe
+
+# Run a script: `make run FILE=tests/meta_arith.aul`
+run: aulfast
+	./aulfast.exe $(FILE)
+
+# Run the same script under the ASAN debug build
+runasan: aul
+	./aul.exe $(FILE)

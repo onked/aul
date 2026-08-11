@@ -2,7 +2,16 @@
 #define aul_chunk_h
 
 #include <stdint.h>
+#include <stdbool.h>
 #include "value.h"
+
+typedef struct InlineCache {
+    bool valid;
+    Value table;
+    uint32_t tableGen;
+    Value key;
+    Value result;
+} InlineCache;
 
 typedef enum {
     OP_CONSTANT,
@@ -56,12 +65,14 @@ typedef enum {
     OP_INT_EQUAL,
     OP_INT_NEGATE,
     OP_INT_INCREMENT,
+    OP_INT_MODULO,
     OP_INT_JLT,
     OP_INT_JLE,
     OP_INT_JGT,
     OP_INT_JGE,
     OP_INT_JE,
     OP_NOT_EQUAL,
+    OP_SQRT,
 } OpCode;
 
 typedef struct {
@@ -70,6 +81,7 @@ typedef struct {
     uint32_t* code;
     int* lines;
     ValueArray constants;
+    struct InlineCache* caches;
 } Chunk;
 
 #define CREATE_ABC(op, a, b, c) ((uint32_t)(((op) & 0xFF) | ((a) << 8) | ((b) << 16) | ((c) << 24)))

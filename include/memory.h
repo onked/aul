@@ -17,6 +17,7 @@ void* reallocate(void* pointer, size_t oldSize, size_t newSize);
 void setCompiling(bool compiling);
 
 void markObject(Obj* object);
+void growGrayStack(void);
 void markValue(Value value);
 void markArray(ValueArray* array);
 void blackenObject(Obj* object);
