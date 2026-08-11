@@ -21,6 +21,7 @@ void* reallocate(void* pointer, size_t oldSize, size_t newSize) {
         markRoots();
     }
 
+    // Start a fresh mark whenever the threshold is crossed outside of compilation.
     if (newSize == 0) {
         free(pointer);
         return NULL;
