@@ -43,9 +43,76 @@ int number(bool canAssign) {
     return reg;
 }
 
+static bool isHexDigit(char c) {
+    return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+}
+
+static ObjString* decodeStringLiteral(Token token) {
+    const char* src = token.start + 1;
+    int len = token.length - 2;
+    bool hasEscape = false;
+    for (int i = 0; i < len; i++) {
+        if (src[i] == '\\') {
+            hasEscape = true;
+            break;
+        }
+    }
+    if (!hasEscape) {
+        return copyString(src, len);
+    }
+
+    char* buf = (char*)malloc(len + 1);
+    int n = 0;
+    int i = 0;
+    while (i < len) {
+        char c = src[i];
+        if (c == '\\' && i + 1 < len) {
+            char e = src[i + 1];
+            switch (e) {
+                case 'n': buf[n++] = '\n'; i += 2; continue;
+                case 't': buf[n++] = '\t'; i += 2; continue;
+                case 'r': buf[n++] = '\r'; i += 2; continue;
+                case '0': buf[n++] = '\0'; i += 2; continue;
+                case 'a': buf[n++] = '\a'; i += 2; continue;
+                case 'b': buf[n++] = '\b'; i += 2; continue;
+                case 'f': buf[n++] = '\f'; i += 2; continue;
+                case 'v': buf[n++] = '\v'; i += 2; continue;
+                case '"': buf[n++] = '"';  i += 2; continue;
+                case '\'': buf[n++] = '\''; i += 2; continue;
+                case '\\': buf[n++] = '\\'; i += 2; continue;
+                case 'x':
+                    if (i + 3 < len && isHexDigit(src[i + 2]) && isHexDigit(src[i + 3])) {
+                        int hi = 0;
+                        if (src[i + 2] >= '0' && src[i + 2] <= '9') hi = src[i + 2] - '0';
+                        else if (src[i + 2] >= 'a' && src[i + 2] <= 'f') hi = src[i + 2] - 'a' + 10;
+                        else hi = src[i + 2] - 'A' + 10;
+                        int lo = 0;
+                        if (src[i + 3] >= '0' && src[i + 3] <= '9') lo = src[i + 3] - '0';
+                        else if (src[i + 3] >= 'a' && src[i + 3] <= 'f') lo = src[i + 3] - 'a' + 10;
+                        else lo = src[i + 3] - 'A' + 10;
+                        buf[n++] = (char)(hi * 16 + lo);
+                        i += 4;
+                        continue;
+                    }
+                    buf[n++] = 'x';
+                    i += 2;
+                    continue;
+                default:
+                    buf[n++] = e;
+                    i += 2;
+                    continue;
+            }
+        }
+        buf[n++] = c;
+        i += 1;
+    }
+    buf[n] = '\0';
+    return takeString(buf, n);
+}
+
 int string(bool canAssign) {
     (void)canAssign;
-    Value value = OBJ_VAL(copyString(parser.previous.start + 1, parser.previous.length - 2));
+    Value value = OBJ_VAL(decodeStringLiteral(parser.previous));
     int reg = allocateRegister();
     emitABx(OP_CONSTANT, reg, makeConstant(value));
     return reg;
@@ -298,32 +365,52 @@ int tableLiteral(bool canAssign) {
     }
     
     if (!check(TOKEN_RIGHT_BRACE)) {
+        int autoIndex = 1;
         do {
-            uint16_t keyConstant;
-            
-            if (check(TOKEN_NUMBER)) {
+            if (check(TOKEN_RIGHT_BRACE)) break;
+            uint16_t keyConstant = 0;
+            bool keyed = false;
+            bool keyedNumber = false;
+            int64_t keyNum = 0;
+
+            if (check(TOKEN_NUMBER) || check(TOKEN_STRING) || check(TOKEN_IDENTIFIER)) {
+                Scanner savedScanner = scanner;
+                Token savedPrev = parser.previous;
+                Token savedCurr = parser.current;
                 advance();
-                double value = strtod(parser.previous.start, NULL);
-                if (value == (double)(int64_t)value && value >= INT48_MIN && value <= INT48_MAX) {
-                    keyConstant = makeConstant(INTEGER_VAL((int64_t)value));
+                Token keyToken = parser.previous;
+                if (match(TOKEN_COLON)) {
+                    if (keyToken.type == TOKEN_NUMBER) {
+                        double value = strtod(keyToken.start, NULL);
+                        if (value == (double)(int64_t)value && value >= INT48_MIN && value <= INT48_MAX) {
+                            keyConstant = makeConstant(INTEGER_VAL((int64_t)value));
+                            keyedNumber = true;
+                            keyNum = (int64_t)value;
+                        } else {
+                            keyConstant = makeConstant(NUMBER_VAL(value));
+                        }
+                    } else if (keyToken.type == TOKEN_STRING) {
+                        keyConstant = makeConstant(OBJ_VAL(decodeStringLiteral(keyToken)));
+                    } else {
+                        keyConstant = makeConstant(OBJ_VAL(copyString(keyToken.start, keyToken.length)));
+                    }
+                    keyed = true;
                 } else {
-                    keyConstant = makeConstant(NUMBER_VAL(value));
+                    scanner = savedScanner;
+                    parser.previous = savedPrev;
+                    parser.current = savedCurr;
                 }
-            } else if (check(TOKEN_STRING)) {
-                advance();
-                keyConstant = makeConstant(OBJ_VAL(copyString(parser.previous.start + 1, parser.previous.length - 2)));
-            } else if (check(TOKEN_IDENTIFIER)) {
-                advance();
-                keyConstant = makeConstant(OBJ_VAL(copyString(parser.previous.start, parser.previous.length)));
-            } else {
-                errorAt(&parser.current, "Expect table key.");
-                return tableReg;
             }
             
-            consume(TOKEN_COLON, "Expect ':' after table key.");
+            if (keyed && keyedNumber && keyNum == autoIndex) {
+                autoIndex = keyNum + 1;
+            }
             
             int valReg = expression();
             int keyReg = allocateRegister();
+            if (!keyed) {
+                keyConstant = makeConstant(INTEGER_VAL(autoIndex++));
+            }
             
             emitABx(OP_CONSTANT, keyReg, keyConstant);
             emitABC(OP_SET_TABLE, tableReg, keyReg, valReg);

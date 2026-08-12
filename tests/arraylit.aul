@@ -1,0 +1,37 @@
+glo arr = {10, 20, 30}
+print(#arr)
+for (k, v in arr) {
+    print(k)
+    print(v)
+}
+glo fruits = {"apple", "banana", "cherry"}
+print(fruits[3])
+glo mixed = {1: "one", "two", 3: "three", "four"}
+print(mixed[2])
+print(mixed[4])
+glo nested = {{1, 2}, {3, 4}}
+print(nested[2][1])
+glo empty = {}
+print(#empty)
+glo trail = {1, 2, 3,}
+print(#trail)
+glo keyed = {x: 5, "y": 6, 7: 8}
+print(keyed.x)
+print(keyed["y"])
+print(keyed[7])
+glo esc = "line1\nline2\ttabbed \"quoted\" \\ backslash"
+print(esc)
+print(#esc)
+glo hexs = "\x41\x42\x43"
+print(hexs)
+glo raw = "no\tescape"
+print(raw)
+glo score = 50
+if (score >= 90) {
+    print("A")
+} else if (score >= 60) {
+    print("B")
+} else {
+    print("C")
+}
+print("done")

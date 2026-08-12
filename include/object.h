@@ -91,6 +91,7 @@ struct ObjString {
     int length;
     char* chars;
     uint32_t hash;
+    uint8_t hashValid;
 };
 
 #define OBJ_TYPE(value)     (AS_OBJ(value)->type)
@@ -118,5 +119,7 @@ ObjUpvalue* newUpvalue(Value* slot);
 ObjTable* newTable();
 ObjString* copyString(const char* chars, int length);
 ObjString* takeString(char* chars, int length);
+ObjString* rawString(char* chars, int length, uint32_t hash);
+uint32_t stringHash(ObjString* string);
 
 #endif

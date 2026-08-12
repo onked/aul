@@ -86,8 +86,24 @@ static void skipWhitespace() {
     }
 }
 
+static bool isHexDigit(char c) {
+    return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+}
+
 static Token string() {
     while (peek() != '"' && !isAtEnd()) {
+        if (peek() == '\\') {
+            advance();
+            if (peek() == 'x') {
+                advance();
+                if (isHexDigit(peek())) advance();
+                if (isHexDigit(peek())) advance();
+                continue;
+            }
+            if (peek() == '\n') scanner.line++;
+            advance();
+            continue;
+        }
         if (peek() == '\n') scanner.line++;
         advance();
     }

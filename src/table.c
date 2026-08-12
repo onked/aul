@@ -24,7 +24,7 @@ void freeTable(Table* table) {
 
 static uint32_t hashValue(Value key) {
     if (IS_STRING(key)) {
-        return AS_STRING(key)->hash;
+        return stringHash(AS_STRING(key));
     }
     if (IS_INTEGER(key)) {
         return (uint32_t)(AS_INTEGER(key));

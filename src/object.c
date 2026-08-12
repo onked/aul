@@ -103,7 +103,20 @@ static ObjString* allocateString(char* chars, int length, uint32_t hash) {
     string->length = length;
     string->chars = chars;
     string->hash = hash;
+    string->hashValid = true;
     return string;
+}
+
+uint32_t stringHash(ObjString* string) {
+    if (string->hashValid) return string->hash;
+    uint32_t hash = 2166136261u;
+    for (int i = 0; i < string->length; i++) {
+        hash ^= (uint8_t)string->chars[i];
+        hash *= 16777619;
+    }
+    string->hash = hash;
+    string->hashValid = true;
+    return hash;
 }
 
 ObjString* takeString(char* chars, int length) {
@@ -128,5 +141,11 @@ ObjString* copyString(const char* chars, int length) {
     heapChars[length] = '\0';
     ObjString* string = allocateString(heapChars, length, hash);
     tableSet(&vm.strings, OBJ_VAL((Obj*)string), NIL_VAL);
+    return string;
+}
+
+ObjString* rawString(char* chars, int length, uint32_t hash) {
+    ObjString* string = allocateString(chars, length, hash);
+    string->hashValid = false;
     return string;
 }

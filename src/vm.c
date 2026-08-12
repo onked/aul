@@ -492,7 +492,7 @@ InterpretResult run(int baseFrame)
                 memcpy(chars, strA->chars, strA->length);
                 memcpy(chars + strA->length, strB->chars, strB->length);
                 chars[length] = '\0';
-                REG_SET(GET_A(inst), OBJ_VAL(takeString(chars, length)));
+                REG_SET(GET_A(inst), OBJ_VAL(rawString(chars, length, 0)));
             } else if (IS_NUMERIC(av) && IS_STRING(bv)) {
                 char numStr[64];
                 double numVal = AS_NUMBER(av);
@@ -508,7 +508,7 @@ InterpretResult run(int baseFrame)
                 memcpy(chars, numStr, numLen);
                 memcpy(chars + numLen, strB->chars, strB->length);
                 chars[length] = '\0';
-                REG_SET(GET_A(inst), OBJ_VAL(takeString(chars, length)));
+                REG_SET(GET_A(inst), OBJ_VAL(rawString(chars, length, 0)));
             } else if (IS_STRING(av) && IS_NUMERIC(bv)) {
                 char numStr[64];
                 double numVal = AS_NUMBER(bv);
@@ -524,7 +524,7 @@ InterpretResult run(int baseFrame)
                 memcpy(chars, strA->chars, strA->length);
                 memcpy(chars + strA->length, numStr, numLen);
                 chars[length] = '\0';
-                REG_SET(GET_A(inst), OBJ_VAL(takeString(chars, length)));
+                REG_SET(GET_A(inst), OBJ_VAL(rawString(chars, length, 0)));
             } else {
                 TRY_BINARY_META(vm.mmAdd);
                 runtimeError("Operands must be numbers or strings.");
