@@ -4,6 +4,9 @@
 #include <time.h>
 
 #include "libs/math.h"
+#include "libs/string.h"
+#include "libs/table.h"
+#include "libs/system.h"
 #include "vm.h"
 #include "object.h"
 #include "table.h"
@@ -301,4 +304,8 @@ void initNativeLibraries(void) {
     tableSet(&mathTable->fields,
              OBJ_VAL((Obj*)copyString("huge", 4)),
              NUMBER_VAL(INFINITY));
+
+    initStringLibrary();
+    initTableLibrary();
+    initSystemLibrary();
 }

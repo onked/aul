@@ -147,6 +147,12 @@ int disassembleInstruction(Chunk *chunk, int offset) {
             return abcInstruction("OP_NOT", instruction, offset);
         case OP_LENGTH:
             return abcInstruction("OP_LENGTH", instruction, offset);
+        case OP_FOR_IN: {
+            uint8_t a = GET_A(instruction);
+            uint16_t jOffset = GET_Bx(instruction);
+            printf("%-16s %4d %4d\n", "OP_FOR_IN", a, jOffset);
+            return offset + 1;
+        }
         case OP_SET_METATABLE:
             return abcInstruction("OP_SET_METATABLE", instruction, offset);
         case OP_GET_METATABLE:

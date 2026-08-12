@@ -256,8 +256,42 @@ static void whileStatement() {
     current->currentLoop = loop.enclosing;
 }
 
+static void forInStatement(Token keyVar, Token valueVar, int varCount);
+
 static void forStatement() {
     consume(TOKEN_LEFT_PAREN, "Expect '(' after 'for'.");
+    
+    if (check(TOKEN_IDENTIFIER)) {
+        Scanner savedScanner = scanner;
+        Token savedPrev = parser.previous;
+        Token savedCurr = parser.current;
+        advance();
+        Token firstVar = parser.previous;
+        bool isForIn = false;
+        Token secondVar = firstVar;
+        int varCount = 1;
+        if (match(TOKEN_IN)) {
+            isForIn = true;
+        } else if (match(TOKEN_COMMA)) {
+            if (check(TOKEN_IDENTIFIER)) {
+                advance();
+                secondVar = parser.previous;
+                varCount = 2;
+            } else {
+                errorAt(&parser.current, "Expect loop variable name.");
+            }
+            if (match(TOKEN_IN)) {
+                isForIn = true;
+            }
+        }
+        if (isForIn) {
+            forInStatement(firstVar, secondVar, varCount);
+            return;
+        }
+        scanner = savedScanner;
+        parser.previous = savedPrev;
+        parser.current = savedCurr;
+    }
     
     if (match(TOKEN_SEMICOLON)) {
          // no initializer
@@ -342,6 +376,57 @@ static void forStatement() {
     if (exitJump != -1) {
         patchJump(exitJump);
     }
+    
+    current->currentLoop = loop.enclosing;
+}
+
+static void forInStatement(Token keyVar, Token valueVar, int varCount) {
+    int tableReg = expression();
+    consume(TOKEN_RIGHT_PAREN, "Expect ')' after iteration table.");
+    consume(TOKEN_LEFT_BRACE, "Expect '{' before for body.");
+    
+    int keyReg = allocateRegister();
+    int valueReg = allocateRegister();
+    int cursorReg = allocateRegister();
+    
+    addLocal(valueVar, valueReg);
+    if (varCount == 2) {
+        addLocal(keyVar, keyReg);
+    }
+    Token cursorName;
+    cursorName.start = "";
+    cursorName.length = 0;
+    cursorName.line = parser.previous.line;
+    addLocal(cursorName, cursorReg);
+    
+    int instOffset = compilingChunk->count;
+    emitABx(OP_FOR_IN, tableReg, 0);
+    
+    Loop loop;
+    loop.continueOffset = instOffset;
+    loop.breakJump = instOffset;
+    loop.enclosing = current->currentLoop;
+    current->currentLoop = &loop;
+    
+    while (!check(TOKEN_RIGHT_BRACE) && !check(TOKEN_EOF)) {
+        declaration();
+    }
+    consume(TOKEN_RIGHT_BRACE, "Expect '}' after for body.");
+    
+    int backOffset = instOffset - compilingChunk->count - 1;
+    emitABx(OP_JUMP, 0, (uint16_t)backOffset);
+    
+    int breakJump = loop.breakJump;
+    while (breakJump != -1 && breakJump != instOffset) {
+        uint32_t inst = compilingChunk->code[breakJump];
+        int nextBreak = GET_Bx(inst);
+        int jumpToHere = compilingChunk->count - breakJump - 1;
+        compilingChunk->code[breakJump] = CREATE_ABx(OP_JUMP, 0, (uint16_t)jumpToHere);
+        breakJump = nextBreak;
+    }
+    uint32_t inst = compilingChunk->code[instOffset];
+    compilingChunk->code[instOffset] = CREATE_ABx(OP_FOR_IN, GET_A(inst),
+        (uint16_t)(compilingChunk->count - instOffset - 1));
     
     current->currentLoop = loop.enclosing;
 }

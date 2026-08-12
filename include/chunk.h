@@ -73,6 +73,7 @@ typedef enum {
     OP_INT_JE,
     OP_NOT_EQUAL,
     OP_SQRT,
+    OP_FOR_IN,
 } OpCode;
 
 typedef struct {

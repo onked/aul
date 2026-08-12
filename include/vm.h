@@ -86,6 +86,7 @@ extern VM vm;
 void initVM();
 void freeVM();
 InterpretResult interpret(const char* source);
+InterpretResult run(int baseFrame);
 void gcStep(void);
 void barrierBack(struct Obj* obj);
 

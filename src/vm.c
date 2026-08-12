@@ -224,7 +224,7 @@ static void closeUpvalues(Value* last) {
     }
 }
 
-static InterpretResult run(int baseFrame);
+InterpretResult run(int baseFrame);
 
 static Value findBinaryMetamethod(Value a, Value b, ObjString* name) {
     Value handler = NIL_VAL;
@@ -277,7 +277,7 @@ static bool callBinaryMetamethod(Value handler, Value a, Value b,
     return true;
 }
 
-static InterpretResult run(int baseFrame)
+InterpretResult run(int baseFrame)
 {
 
     register CallFrame* frame = &vm.frames[vm.frameCount - 1];
@@ -413,7 +413,8 @@ static InterpretResult run(int baseFrame)
         [OP_INT_JGE] = &&OP_INT_JGE,
         [OP_INT_JE] = &&OP_INT_JE,
         [OP_NOT_EQUAL] = &&OP_NOT_EQUAL,
-        [OP_SQRT]      = &&OP_SQRT,
+[OP_SQRT] = &&OP_SQRT,
+        [OP_FOR_IN] = &&OP_FOR_IN,
     };
 
     uint32_t instruction;
@@ -912,6 +913,62 @@ static InterpretResult run(int baseFrame)
         }
 
 #ifdef __GNUC__
+        OP_FOR_IN:
+#else
+        case OP_FOR_IN:
+#endif
+        {
+            uint8_t tableReg = GET_A(instruction);
+            int keyReg = tableReg + 1;
+            int valueReg = tableReg + 2;
+            int cursorReg = tableReg + 3;
+            int32_t offset = GET_Bx(instruction);
+
+            if (!IS_TABLE(REG(tableReg))) {
+                runtimeError("Can only iterate over tables.");
+                return INTERPRET_RUNTIME_ERROR;
+            }
+            ObjTable* table = AS_TABLE(REG(tableReg));
+
+            int64_t cursor = 0;
+            Value curVal = REG(cursorReg);
+            if (IS_INTEGER(curVal)) cursor = AS_INTEGER(curVal);
+
+            for (;;) {
+                if (cursor < (int64_t)table->arrayCapacity) {
+                    Value v = table->array[cursor];
+                    if (IS_NIL(v)) {
+                        cursor++;
+                        continue;
+                    }
+                    REG_SET(keyReg, INTEGER_VAL(cursor + 1));
+                    REG_SET(valueReg, v);
+                    REG_SET(cursorReg, INTEGER_VAL(cursor + 1));
+                    break;
+                }
+                int64_t e = cursor - (int64_t)table->arrayCapacity;
+                if (e >= (int64_t)table->fields.capacity) {
+                    FRAME.ip += offset;
+                    break;
+                }
+                Entry* entry = &table->fields.entries[e];
+                if (IS_NIL(entry->key)) {
+                    cursor++;
+                    continue;
+                }
+                REG_SET(keyReg, entry->key);
+                REG_SET(valueReg, entry->value);
+                REG_SET(cursorReg, INTEGER_VAL(cursor + 1));
+                break;
+            }
+#ifdef __GNUC__
+            DISPATCH_POLL();
+#else
+            break;
+#endif
+        }
+
+#ifdef __GNUC__
         OP_SET_METATABLE:
 #else
         case OP_SET_METATABLE:
@@ -1013,12 +1070,12 @@ static InterpretResult run(int baseFrame)
                     found = !IS_NIL(result);
                 }
                 if (!found) {
-                    found = tableGet(&table->fields, keyVal, &result);
+                    found = objTableGet(table, keyVal, &result);
                 }
             } else if (IS_NUMBER(keyVal)) {
-                found = tableGet(&table->fields, keyVal, &result);
+                found = objTableGet(table, keyVal, &result);
             } else if (IS_STRING(keyVal)) {
-                found = tableGet(&table->fields, keyVal, &result);
+                found = objTableGet(table, keyVal, &result);
             } else {
                 runtimeError("Table key must be a number or string.");
                 return INTERPRET_RUNTIME_ERROR;
@@ -1045,12 +1102,12 @@ static InterpretResult run(int baseFrame)
                                 found = !IS_NIL(result);
                             }
                             if (!found) {
-                                found = tableGet(&idxTable->fields, keyVal, &result);
+                                found = objTableGet(idxTable, keyVal, &result);
                             }
                         } else if (IS_NUMBER(keyVal)) {
-                            found = tableGet(&idxTable->fields, keyVal, &result);
+                            found = objTableGet(idxTable, keyVal, &result);
                         } else if (IS_STRING(keyVal)) {
-                            found = tableGet(&idxTable->fields, keyVal, &result);
+                            found = objTableGet(idxTable, keyVal, &result);
                         }
                     } else if (IS_CLOSURE(indexValue) || IS_FUNCTION(indexValue)) {
                         result = indexValue;

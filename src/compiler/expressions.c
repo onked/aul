@@ -115,6 +115,22 @@ int binary(int leftReg) {
     return destReg;
 }
 
+static void emitGet(OpCode op, int destReg, int arg) {
+    if (op == OP_GET_GLOBAL) {
+        emitABx(op, destReg, arg);
+    } else {
+        emitABC(op, destReg, arg, 0);
+    }
+}
+
+static void emitSet(OpCode op, int arg, int valReg) {
+    if (op == OP_SET_GLOBAL) {
+        emitABx(op, valReg, arg);
+    } else {
+        emitABC(op, arg, valReg, 0);
+    }
+}
+
 int variable(bool canAssign) {
     Token name = parser.previous;
     
@@ -220,7 +236,7 @@ int variable(bool canAssign) {
                 emitABC(OP_MOVE, arg, resultReg, 0);
             } else {
                 int loadReg = allocateRegister();
-                emitABC(getOp, loadReg, arg, 0);
+                emitGet(getOp, loadReg, arg);
                 if (op == TOKEN_PLUS_EQUAL) {
                     emitABC(OP_ADD, resultReg, loadReg, valReg);
                 } else if (op == TOKEN_MINUS_EQUAL) {
@@ -230,7 +246,7 @@ int variable(bool canAssign) {
                 } else {
                     emitABC(OP_DIVIDE, resultReg, loadReg, valReg);
                 }
-                emitABC(setOp, arg, resultReg, 0);
+                emitSet(setOp, arg, resultReg);
             }
             nextFreeRegister--;
             return resultReg;
@@ -241,7 +257,7 @@ int variable(bool canAssign) {
             if (getOp == OP_MOVE) {
                 emitABC(OP_MOVE, arg, valReg, 0);
             } else {
-                emitABC(setOp, arg, valReg, 0);
+                emitSet(setOp, arg, valReg);
             }
             return valReg;
         }
@@ -256,9 +272,9 @@ int variable(bool canAssign) {
                 emitABC(OP_MOVE, arg, resultReg, 0);
             } else {
                 int loadReg = allocateRegister();
-                emitABC(getOp, loadReg, arg, 0);
+                emitGet(getOp, loadReg, arg);
                 emitABC(OP_ADD, resultReg, loadReg, oneReg);
-                emitABC(setOp, arg, resultReg, 0);
+                emitSet(setOp, arg, resultReg);
             }
             nextFreeRegister -= 2;
             return resultReg;
@@ -268,7 +284,7 @@ int variable(bool canAssign) {
     if (getOp == OP_MOVE) return arg;
 
     int destReg = allocateRegister();
-    emitABC(getOp, destReg, arg, 0);
+    emitGet(getOp, destReg, arg);
     return destReg;
 }
 
