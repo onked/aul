@@ -38,7 +38,7 @@ typedef struct {
     Obj obj;
     int arity;
     int upvalueCount;
-    int maxRegs; // number of registers this function uses (for GC scanning)
+    int maxRegs;
     Chunk chunk;
     struct ObjString* name;
     Upvalue upvalues[250];
@@ -89,6 +89,7 @@ typedef struct {
 struct ObjString {
     Obj obj;
     int length;
+    int capacity;
     char* chars;
     uint32_t hash;
     uint8_t hashValid;
@@ -119,7 +120,7 @@ ObjUpvalue* newUpvalue(Value* slot);
 ObjTable* newTable();
 ObjString* copyString(const char* chars, int length);
 ObjString* takeString(char* chars, int length);
-ObjString* rawString(char* chars, int length, uint32_t hash);
+ObjString* rawString(char* chars, int length, uint32_t hash, int capacity);
 uint32_t stringHash(ObjString* string);
 
 #endif

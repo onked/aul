@@ -41,6 +41,7 @@ static inline Value numberToValue(double d) {
 #define IS_NIL(v)     ((v) == NIL_VAL)
 #define IS_BOOL(v)    ((v) == TRUE_VAL || (v) == FALSE_VAL)
 #define IS_OBJ(v)     (((v) & TAG_MASK) == (QNAN_TAG | 0x3ULL))
+#define IS_NUMERIC(v) (IS_NUMBER(v) || IS_INTEGER(v))
 
 #define AS_BOOL(v)    ((v) == TRUE_VAL)
 #define AS_INTEGER(v) ((int64_t)((int64_t)((uint64_t)((v) & INT_DATA_MASK) << 13) >> 16))
@@ -64,5 +65,6 @@ void writeValueArray(ValueArray* array, Value value);
 void freeValueArray(ValueArray* array);
 void printValue(Value value);
 bool valuesEqual(Value a, Value b);
+Value normalizeNumericKey(Value key);
 
 #endif

@@ -32,6 +32,11 @@ static void localDeclaration() {
     int reg;
     if (match(TOKEN_EQUAL)) {
         reg = expression();
+        if (regIsBoundToLocal(reg)) {
+            int fresh = allocateRegister();
+            emitABC(OP_MOVE, fresh, reg, 0);
+            reg = fresh;
+        }
     } else {
         reg = allocateRegister();
         emitABC(OP_NIL, reg, 0, 0);
@@ -385,9 +390,18 @@ static void forInStatement(Token keyVar, Token valueVar, int varCount) {
     consume(TOKEN_RIGHT_PAREN, "Expect ')' after iteration table.");
     consume(TOKEN_LEFT_BRACE, "Expect '{' before for body.");
     
+    // The VM derives key/value/cursor from tableReg+1/+2/+3, so the table
+    // must live in a register with three free slots after it. A local could
+    // sit right after the table's register, so copy the table into a fresh
+    // temp first.
+    int tmpTableReg = allocateRegister();
+    emitABC(OP_MOVE, tmpTableReg, tableReg, 0);
     int keyReg = allocateRegister();
     int valueReg = allocateRegister();
     int cursorReg = allocateRegister();
+    // The VM resumes iteration from the cursor register on every FOR_IN
+    // execution, including the first, so it must be initialized.
+    emitABx(OP_CONSTANT, cursorReg, makeConstant(INTEGER_VAL(0)));
     
     addLocal(valueVar, valueReg);
     if (varCount == 2) {
@@ -400,7 +414,7 @@ static void forInStatement(Token keyVar, Token valueVar, int varCount) {
     addLocal(cursorName, cursorReg);
     
     int instOffset = compilingChunk->count;
-    emitABx(OP_FOR_IN, tableReg, 0);
+    emitABx(OP_FOR_IN, tmpTableReg, 0);
     
     Loop loop;
     loop.continueOffset = instOffset;

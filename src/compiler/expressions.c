@@ -2,6 +2,7 @@
 #include <string.h>
 
 #include "compiler_shared.h"
+#include "compiler.h"
 
 static int resolveLocal(Token* name);
 
@@ -165,7 +166,13 @@ int binary(int leftReg) {
     int destReg = allocateRegister();
     
     switch (operatorType) {
-        case TOKEN_PLUS:          emitABC(OP_ADD,      destReg, leftReg, rightReg); break;
+        case TOKEN_PLUS:
+            if (!regIsBoundToLocal(leftReg)) {
+                emitABC(OP_ADD_BUF, destReg, leftReg, rightReg);
+            } else {
+                emitABC(OP_ADD, destReg, leftReg, rightReg);
+            }
+            break;
         case TOKEN_MINUS:         emitABC(OP_SUBTRACT, destReg, leftReg, rightReg); break;
         case TOKEN_STAR:          emitABC(OP_MULTIPLY, destReg, leftReg, rightReg); break;
         case TOKEN_SLASH:         emitABC(OP_DIVIDE,   destReg, leftReg, rightReg); break;

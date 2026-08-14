@@ -72,6 +72,11 @@ typedef struct {
     struct ObjString* mmMul;
     struct ObjString* mmDiv;
 
+    // Last string concatenation result and the register holding it.
+    // OP_ADD_BUF may append in place only when both match (exclusive temp flow).
+    Value openString;
+    int openStringReg;
+
     GlobalCacheEntry globalCache[GLOBAL_CACHE_SIZE];
 } VM;
 

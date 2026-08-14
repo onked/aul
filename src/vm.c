@@ -66,6 +66,8 @@ void initVM()
     vm.mmSub      = copyString("__sub", 5);
     vm.mmMul      = copyString("__mul", 5);
     vm.mmDiv      = copyString("__div", 5);
+    vm.openString = NIL_VAL;
+    vm.openStringReg = -1;
     for (int i = 0; i < GLOBAL_CACHE_SIZE; i++) {
         vm.globalCache[i].name = NULL;
     }
@@ -288,7 +290,6 @@ InterpretResult run(int baseFrame)
 #define REG(index) (FRAME.slots[index])
 
 // binary op macro - checks types and applies the operator
-#define IS_NUMERIC(v) (IS_NUMBER(v) || IS_INTEGER(v))
 
 #define STORE_INT(dst, val) do { \
     int64_t _v = (val); \
@@ -363,6 +364,7 @@ InterpretResult run(int baseFrame)
         [OP_SET_UPVALUE] = &&OP_SET_UPVALUE,
         [OP_PRINT] = &&OP_PRINT,
         [OP_ADD] = &&OP_ADD,
+        [OP_ADD_BUF] = &&OP_ADD_BUF,
         [OP_SUBTRACT] = &&OP_SUBTRACT,
         [OP_MULTIPLY] = &&OP_MULTIPLY,
         [OP_DIVIDE] = &&OP_DIVIDE,
@@ -461,6 +463,75 @@ InterpretResult run(int baseFrame)
         }
 
 #ifdef __GNUC__
+        OP_ADD_BUF:
+#else
+        case OP_ADD_BUF:
+#endif
+        {
+            uint32_t inst = FRAME.ip[-1];
+            Value bv = REG(GET_C(inst));
+            Value av = REG(GET_B(inst));
+            if (av == vm.openString && GET_B(inst) == vm.openStringReg) {
+                ObjString* strA = AS_STRING(av);
+                if (IS_STRING(bv)) {
+                    ObjString* strB = AS_STRING(bv);
+                    int length = strA->length + strB->length;
+                    if (length > strA->capacity) {
+                        int newCap = strA->capacity < 64 ? 64 : strA->capacity * 2;
+                        if (newCap < length) newCap = length;
+                        strA->chars = (char*)reallocate(strA->chars,
+                                                        strA->capacity + 1, newCap + 1);
+                        strA->capacity = newCap;
+                    }
+                    memcpy(strA->chars + strA->length, strB->chars, strB->length);
+                    strA->length = length;
+                    strA->chars[length] = '\0';
+                    strA->hashValid = false;
+                    REG_SET(GET_A(inst), av);
+                    vm.openStringReg = GET_A(inst);
+#ifdef __GNUC__
+                    DISPATCH_POLL();
+#else
+                    break;
+#endif
+                } else if (IS_NUMERIC(bv)) {
+                    char numStr[64];
+                    double numVal = AS_NUMBER(bv);
+                    int numLen;
+                    if (numVal == (double)(int64_t)numVal) {
+                        numLen = snprintf(numStr, sizeof(numStr), "%.0f", numVal);
+                    } else {
+                        numLen = snprintf(numStr, sizeof(numStr), "%g", numVal);
+                    }
+                    int length = strA->length + numLen;
+                    if (length > strA->capacity) {
+                        int newCap = strA->capacity < 64 ? 64 : strA->capacity * 2;
+                        if (newCap < length) newCap = length;
+                        strA->chars = (char*)reallocate(strA->chars,
+                                                        strA->capacity + 1, newCap + 1);
+                        strA->capacity = newCap;
+                    }
+                    memcpy(strA->chars + strA->length, numStr, numLen);
+                    strA->length = length;
+                    strA->chars[length] = '\0';
+                    strA->hashValid = false;
+                    REG_SET(GET_A(inst), av);
+                    vm.openStringReg = GET_A(inst);
+#ifdef __GNUC__
+                    DISPATCH_POLL();
+#else
+                    break;
+#endif
+                }
+            }
+#ifdef __GNUC__
+            goto OP_ADD;
+#else
+            /* falls through to OP_ADD */
+#endif
+        }
+
+#ifdef __GNUC__
         OP_ADD:
 #else
         case OP_ADD:
@@ -488,11 +559,14 @@ InterpretResult run(int baseFrame)
                 ObjString* strA = AS_STRING(av);
                 ObjString* strB = AS_STRING(bv);
                 int length = strA->length + strB->length;
-                char* chars = (char*)reallocate(NULL, 0, length + 1);
+                int cap = length + (length < 64 ? 16 : length / 4);
+                char* chars = (char*)reallocate(NULL, 0, cap + 1);
                 memcpy(chars, strA->chars, strA->length);
                 memcpy(chars + strA->length, strB->chars, strB->length);
                 chars[length] = '\0';
-                REG_SET(GET_A(inst), OBJ_VAL(rawString(chars, length, 0)));
+                vm.openString = OBJ_VAL(rawString(chars, length, 0, cap));
+                vm.openStringReg = GET_A(inst);
+                REG_SET(GET_A(inst), vm.openString);
             } else if (IS_NUMERIC(av) && IS_STRING(bv)) {
                 char numStr[64];
                 double numVal = AS_NUMBER(av);
@@ -508,7 +582,9 @@ InterpretResult run(int baseFrame)
                 memcpy(chars, numStr, numLen);
                 memcpy(chars + numLen, strB->chars, strB->length);
                 chars[length] = '\0';
-                REG_SET(GET_A(inst), OBJ_VAL(rawString(chars, length, 0)));
+                vm.openString = OBJ_VAL(rawString(chars, length, 0, length));
+                vm.openStringReg = GET_A(inst);
+                REG_SET(GET_A(inst), vm.openString);
             } else if (IS_STRING(av) && IS_NUMERIC(bv)) {
                 char numStr[64];
                 double numVal = AS_NUMBER(bv);
@@ -520,11 +596,14 @@ InterpretResult run(int baseFrame)
                 }
                 ObjString* strA = AS_STRING(av);
                 int length = strA->length + numLen;
-                char* chars = (char*)reallocate(NULL, 0, length + 1);
+                int cap = length + (length < 64 ? 16 : length / 4);
+                char* chars = (char*)reallocate(NULL, 0, cap + 1);
                 memcpy(chars, strA->chars, strA->length);
                 memcpy(chars + strA->length, numStr, numLen);
                 chars[length] = '\0';
-                REG_SET(GET_A(inst), OBJ_VAL(rawString(chars, length, 0)));
+                vm.openString = OBJ_VAL(rawString(chars, length, 0, cap));
+                vm.openStringReg = GET_A(inst);
+                REG_SET(GET_A(inst), vm.openString);
             } else {
                 TRY_BINARY_META(vm.mmAdd);
                 runtimeError("Operands must be numbers or strings.");
@@ -690,19 +769,7 @@ InterpretResult run(int baseFrame)
             uint32_t inst = FRAME.ip[-1];
             Value b = REG(GET_C(inst));
             Value a = REG(GET_B(inst));
-            bool equal = false;
-            if (IS_BOOL(a) && IS_BOOL(b)) {
-                equal = AS_BOOL(a) == AS_BOOL(b);
-            } else if (IS_NIL(a) && IS_NIL(b)) {
-                equal = true;
-            } else if (IS_INTEGER(a) && IS_INTEGER(b)) {
-                equal = AS_INTEGER(a) == AS_INTEGER(b);
-            } else if (IS_NUMERIC(a) && IS_NUMERIC(b)) {
-                equal = AS_NUMBER(a) == AS_NUMBER(b);
-            } else if (IS_OBJ(a) && IS_OBJ(b)) {
-                equal = AS_OBJ(a) == AS_OBJ(b);
-            }
-            REG(GET_A(inst)) = BOOL_VAL(equal);
+            REG(GET_A(inst)) = BOOL_VAL(valuesEqual(a, b));
 #ifdef __GNUC__
             DISPATCH();
 #else
@@ -719,19 +786,7 @@ InterpretResult run(int baseFrame)
             uint32_t inst = FRAME.ip[-1];
             Value b = REG(GET_C(inst));
             Value a = REG(GET_B(inst));
-            bool equal = false;
-            if (IS_BOOL(a) && IS_BOOL(b)) {
-                equal = AS_BOOL(a) == AS_BOOL(b);
-            } else if (IS_NIL(a) && IS_NIL(b)) {
-                equal = true;
-            } else if (IS_INTEGER(a) && IS_INTEGER(b)) {
-                equal = AS_INTEGER(a) == AS_INTEGER(b);
-            } else if (IS_NUMERIC(a) && IS_NUMERIC(b)) {
-                equal = AS_NUMBER(a) == AS_NUMBER(b);
-            } else if (IS_OBJ(a) && IS_OBJ(b)) {
-                equal = AS_OBJ(a) == AS_OBJ(b);
-            }
-            REG(GET_A(inst)) = BOOL_VAL(!equal);
+            REG(GET_A(inst)) = BOOL_VAL(!valuesEqual(a, b));
 #ifdef __GNUC__
             DISPATCH();
 #else
@@ -900,7 +955,7 @@ InterpretResult run(int baseFrame)
                 while (len > 0 && IS_NIL(table->array[len - 1])) {
                     len--;
                 }
-                REG_SET(dest, NUMBER_VAL((double)len));
+                REG_SET(dest, INTEGER_VAL(len));
             } else {
                 runtimeError("Operand must be a table.");
                 return INTERPRET_RUNTIME_ERROR;
@@ -924,6 +979,8 @@ InterpretResult run(int baseFrame)
             int cursorReg = tableReg + 3;
             int32_t offset = GET_Bx(instruction);
 
+            vm.openString = NIL_VAL;
+            vm.openStringReg = -1;
             if (!IS_TABLE(REG(tableReg))) {
                 runtimeError("Can only iterate over tables.");
                 return INTERPRET_RUNTIME_ERROR;
@@ -1008,6 +1065,8 @@ InterpretResult run(int baseFrame)
             uint8_t dest = GET_A(instruction);
             uint8_t src = GET_B(instruction);
             Value val = REG(src);
+            vm.openString = NIL_VAL;
+            vm.openStringReg = -1;
             if (IS_TABLE(val)) {
                 ObjTable* table = AS_TABLE(val);
                 if (table->metatable != NULL) {
@@ -1036,7 +1095,9 @@ InterpretResult run(int baseFrame)
             uint8_t tableReg = GET_B(instruction);
             uint8_t keyReg = GET_C(instruction);
             Value tableVal = REG(tableReg);
-            Value keyVal = REG(keyReg);
+            Value keyVal = normalizeNumericKey(REG(keyReg));
+            vm.openString = NIL_VAL;
+            vm.openStringReg = -1;
 
             // Inline cache check (per-chunk, indexed by instruction position)
             Chunk* chunk = &FRAME.closure->function->chunk;
@@ -1143,7 +1204,7 @@ InterpretResult run(int baseFrame)
             uint8_t keyReg = GET_B(instruction);
             uint8_t valReg = GET_C(instruction);
             Value tableVal = REG(tableReg);
-            Value keyVal = REG(keyReg);
+            Value keyVal = normalizeNumericKey(REG(keyReg));
             Value value = REG(valReg);
 
             if (!IS_TABLE(tableVal)) {
@@ -1384,6 +1445,8 @@ InterpretResult run(int baseFrame)
         {
             ObjString *name = AS_STRING(READ_CONSTANT(instruction));
             GlobalCacheEntry* gc = &vm.globalCache[(name->hash) & (GLOBAL_CACHE_SIZE - 1)];
+            vm.openString = NIL_VAL;
+            vm.openStringReg = -1;
             if (gc->name == name && gc->generation == vm.globals.generation) {
                 REG(GET_A(instruction)) = gc->entry->value;
 #ifdef __GNUC__
@@ -1453,6 +1516,8 @@ InterpretResult run(int baseFrame)
         {
             uint8_t reg = GET_A(instruction);
             uint8_t slot = GET_B(instruction);
+            vm.openString = NIL_VAL;
+            vm.openStringReg = -1;
             REG_SET(reg, *FRAME.closure->upvalues[slot]->location);
 #ifdef __GNUC__
             DISPATCH();
@@ -1469,6 +1534,8 @@ InterpretResult run(int baseFrame)
         {
             uint8_t reg = GET_A(instruction);
             uint8_t slot = GET_B(instruction);
+            vm.openString = NIL_VAL;
+            vm.openStringReg = -1;
             REG_SET(reg, FRAME.closure->readonlyValues[slot]);
 #ifdef __GNUC__
             DISPATCH();
@@ -1528,6 +1595,8 @@ InterpretResult run(int baseFrame)
         {
             uint8_t dest = GET_A(instruction);
             uint8_t src = GET_B(instruction);
+            vm.openString = NIL_VAL;
+            vm.openStringReg = -1;
             REG_SET(dest, REG(src));
 #ifdef __GNUC__
             DISPATCH();
@@ -1934,6 +2003,8 @@ InterpretResult run(int baseFrame)
              int argCount = GET_B(instruction);
              Value callee = REG(reg);
              ObjClosure* closure = NULL;
+             vm.openString = NIL_VAL;
+             vm.openStringReg = -1;
 
              if (IS_CLOSURE(callee)) {
                  closure = AS_CLOSURE(callee);

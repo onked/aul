@@ -100,6 +100,8 @@ int disassembleInstruction(Chunk *chunk, int offset) {
             return simpleRegister("OP_NIL", instruction, offset);
         case OP_ADD:
             return abcInstruction("OP_ADD", instruction, offset);
+        case OP_ADD_BUF:
+            return abcInstruction("OP_ADD_BUF", instruction, offset);
         case OP_SUBTRACT:
             return abcInstruction("OP_SUBTRACT", instruction, offset);
         case OP_MULTIPLY:

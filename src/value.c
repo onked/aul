@@ -66,9 +66,20 @@ void printValue(Value value) {
     }
 }
 
+Value normalizeNumericKey(Value key) {
+    if (IS_NUMBER(key)) {
+        double d = AS_NUMBER_NC(key);
+        if (d >= (double)INT48_MIN && d < (double)INT48_MAX + 1.0) {
+            int64_t iv = (int64_t)d;
+            if ((double)iv == d) return INTEGER_VAL(iv);
+        }
+    }
+    return key;
+}
+
 bool valuesEqual(Value a, Value b) {
     if (a == b) return true;
-    if (IS_NUMBER(a) && IS_NUMBER(b)) return valueToNumber(a) == valueToNumber(b);
+    if (IS_NUMERIC(a) && IS_NUMERIC(b)) return valueToNumber(a) == valueToNumber(b);
     if (IS_OBJ(a) && IS_OBJ(b) && AS_OBJ(a)->type == AS_OBJ(b)->type) {
         if (IS_STRING(a)) {
             ObjString* sa = AS_STRING(a);

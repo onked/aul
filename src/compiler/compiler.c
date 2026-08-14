@@ -14,6 +14,13 @@ Compiler* current = NULL;
 Chunk* compilingChunk;
 int nextFreeRegister = 0;
 
+bool regIsBoundToLocal(int reg) {
+    for (int k = 0; k < current->localCount; k++) {
+        if (current->locals[k].reg == reg) return true;
+    }
+    return false;
+}
+
 void emitABC(OpCode op, int a, int b, int c) {
     writeChunk(compilingChunk, CREATE_ABC(op, a, b, c), parser.previous.line);
 }

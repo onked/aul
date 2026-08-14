@@ -23,6 +23,7 @@ typedef enum {
     OP_GET_READONLY_UPVALUE,
     OP_PRINT,
     OP_ADD,
+    OP_ADD_BUF,
     OP_SUBTRACT,
     OP_MULTIPLY,
     OP_DIVIDE,

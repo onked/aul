@@ -98,9 +98,10 @@ static uint32_t hashString(const char* key, int length) {
     return hash;
 }
 
-static ObjString* allocateString(char* chars, int length, uint32_t hash) {
+static ObjString* allocateString(char* chars, int length, uint32_t hash, int capacity) {
     ObjString* string = (ObjString*)allocateObject(sizeof(ObjString), OBJ_STRING);
     string->length = length;
+    string->capacity = capacity;
     string->chars = chars;
     string->hash = hash;
     string->hashValid = true;
@@ -126,7 +127,7 @@ ObjString* takeString(char* chars, int length) {
         reallocate(chars, length + 1, 0);
         return interned;
     }
-    ObjString* string = allocateString(chars, length, hash);
+    ObjString* string = allocateString(chars, length, hash, length);
     tableSet(&vm.strings, OBJ_VAL((Obj*)string), NIL_VAL);
     return string;
 }
@@ -139,13 +140,13 @@ ObjString* copyString(const char* chars, int length) {
     char* heapChars = (char*)reallocate(NULL, 0, length + 1);
     memcpy(heapChars, chars, length);
     heapChars[length] = '\0';
-    ObjString* string = allocateString(heapChars, length, hash);
+    ObjString* string = allocateString(heapChars, length, hash, length);
     tableSet(&vm.strings, OBJ_VAL((Obj*)string), NIL_VAL);
     return string;
 }
 
-ObjString* rawString(char* chars, int length, uint32_t hash) {
-    ObjString* string = allocateString(chars, length, hash);
+ObjString* rawString(char* chars, int length, uint32_t hash, int capacity) {
+    ObjString* string = allocateString(chars, length, hash, capacity);
     string->hashValid = false;
     return string;
 }

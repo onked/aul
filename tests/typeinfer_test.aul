@@ -1,0 +1,80 @@
+glo flag = 1
+
+loc a = 0
+if (flag == 1) {
+    a = "str"
+} else {
+    a = 5
+}
+if (a + 1 == "str1") { print("ok 1") } else { print("FAIL 1") }
+
+glo flag2 = 0
+loc b = 0
+if (flag2 == 1) {
+    b = 5
+} else {
+    b = "str"
+}
+if (b + 1 == "str1") { print("ok 2") } else { print("FAIL 2") }
+
+loc c = "s"
+while (1 == 2) {
+    c = 5
+}
+if (c + 1 == "s1") { print("ok 3") } else { print("FAIL 3") }
+
+glo total = 0
+for (loc i = 0; i < 10; i = i + 1) {
+    total = total + i
+}
+if (total == 45) { print("ok 4") } else { print("FAIL 4") }
+
+glo x = 0
+for (loc i = 0; i < 5; i = i + 1) {
+    x = "word"
+}
+if (x + 1 == "word1") { print("ok 5") } else { print("FAIL 5") }
+
+glo acc = 0
+for (loc i = 0; i < 100000; i = i + 1) {
+    acc = acc + i
+}
+if (acc == 4999950000) { print("ok 6") } else { print("FAIL 6") }
+
+glo y = 1
+if (flag == 1) {
+    y = "txt"
+} else {
+    y = 7
+}
+if (y == "txt") { print("ok 7") } else { print("FAIL 7") }
+
+loc s1 = "foo" + "bar"
+loc s2 = "foo"
+s2 = s2 + "bar"
+loc s3 = 5 + "x"
+if (s1 == "foobar") { print("ok 8") } else { print("FAIL 8") }
+if (s2 == "foobar") { print("ok 9") } else { print("FAIL 9") }
+if (s3 == "5x") { print("ok 10") } else { print("FAIL 10") }
+if (s1 != "nope") { print("ok 11") } else { print("FAIL 11") }
+
+loc t = {}
+for (loc i = 1; i <= 10; i = i + 1) {
+    t[i] = i
+}
+loc sum = 0
+for (_, v in t) {
+    sum = sum + v
+}
+if (sum == 55) { print("ok 12") } else { print("FAIL 12") }
+if (#t == 10) { print("ok 13") } else { print("FAIL 13") }
+
+loc u = {1, 2, 3}
+loc r = 0
+loc pad1 = "x"
+loc pad2 = "y"
+loc pad3 = "z"
+for (k, v in u) {
+    r = r + k + v
+}
+if (r == 12) { print("ok 14") } else { print("FAIL 14") }

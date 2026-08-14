@@ -44,15 +44,33 @@ static void runFile(const char* source) {
     if (result == INTERPRET_RUNTIME_ERROR) exit(70);
 }
 
+static void dumpFunc(ObjFunction* fn, const char* name) {
+    disassembleChunk(&fn->chunk, name);
+    for (int i = 0; i < fn->chunk.constants.count; i++) {
+        Value v = fn->chunk.constants.values[i];
+        if (IS_OBJ(v) && AS_OBJ(v)->type == OBJ_FUNCTION) {
+            ObjFunction* inner = AS_FUNCTION(v);
+            dumpFunc(inner, inner->name ? inner->name->chars : "<anon>");
+        }
+    }
+}
+
 int main(int argc, const char* argv[]) {
     initVM();
+
+    if (argc == 3 && strcmp(argv[1], "-d") == 0) {
+        char* source = readFile(argv[2]);
+        ObjFunction* fn = compile(source);
+        if (fn != NULL) dumpFunc(fn, "<script>");
+        exit(0);
+    }
 
     if (argc == 2) {
         char* source = readFile(argv[1]);
         runFile(source); 
         free(source);
     } else {
-        printf("Usage: aul [path]\n");
+        printf("Usage: aul [path] | aul -d [path]\n");
     }
 
     freeVM();

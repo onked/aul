@@ -9,7 +9,7 @@ static void adjustJumpsCrossing(Chunk* chunk, int removePos) {
         OpCode op = GET_OP(inst);
         int16_t off;
         switch (op) {
-            case OP_JUMP: case OP_JUMP_IF_FALSE:
+            case OP_JUMP: case OP_JUMP_IF_FALSE: case OP_FOR_IN:
                 off = (int16_t)GET_Bx(inst); break;
             case OP_INT_JLT: case OP_INT_JLE:
             case OP_INT_JGT: case OP_INT_JGE:
@@ -19,12 +19,12 @@ static void adjustJumpsCrossing(Chunk* chunk, int removePos) {
         }
         int16_t target = (int16_t)(j + 1) + off;
         if (j < removePos && target > removePos) {
-            if (op == OP_JUMP || op == OP_JUMP_IF_FALSE)
+            if (op == OP_JUMP || op == OP_JUMP_IF_FALSE || op == OP_FOR_IN)
                 chunk->code[j] = CREATE_ABx(op, GET_A(inst), (uint16_t)(off - 1));
             else
                 chunk->code[j] = CREATE_ABC(op, GET_A(inst), GET_B(inst), (uint8_t)((off - 1) & 0xFF));
         } else if (j > removePos && target <= removePos - 1) {
-            if (op == OP_JUMP || op == OP_JUMP_IF_FALSE)
+            if (op == OP_JUMP || op == OP_JUMP_IF_FALSE || op == OP_FOR_IN)
                 chunk->code[j] = CREATE_ABx(op, GET_A(inst), (uint16_t)(off + 1));
             else
                 chunk->code[j] = CREATE_ABC(op, GET_A(inst), GET_B(inst), (uint8_t)((off + 1) & 0xFF));
@@ -61,7 +61,7 @@ static int instDestReg(uint32_t inst) {
 
 static bool instReadsReg(uint32_t inst, uint8_t reg) {
     switch (GET_OP(inst)) {
-        case OP_ADD: case OP_SUBTRACT: case OP_MULTIPLY:
+        case OP_ADD: case OP_ADD_BUF: case OP_SUBTRACT: case OP_MULTIPLY:
         case OP_DIVIDE: case OP_MODULO:
         case OP_EQUAL: case OP_NOT_EQUAL: case OP_GREATER: case OP_LESS:
         case OP_GREATER_EQUAL: case OP_LESS_EQUAL:
@@ -84,6 +84,7 @@ static bool instReadsReg(uint32_t inst, uint8_t reg) {
         case OP_CALL:
         case OP_INCREMENT:
         case OP_INT_INCREMENT:
+        case OP_FOR_IN:
             return GET_A(inst) == reg;
         case OP_CONSTANT: case OP_CLOSURE: case OP_GET_GLOBAL:
         case OP_JUMP: case OP_NIL: case OP_TRUE: case OP_FALSE:
