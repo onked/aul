@@ -1,4 +1,4 @@
-#include <stdio.h>
+﻿#include <stdio.h>
 #include <stdarg.h>
 #include <string.h>
 #include <stdlib.h>
@@ -27,20 +27,109 @@ static void resetStack()
     vm.openUpvalues = NULL;
 }
 
+static int raiseError(Value message)
+{
+    if (IS_NIL(vm.pendingError)) vm.errorPrinted = false;
+    vm.pendingError = message;
+    vm.openString = NIL_VAL;
+    vm.openStringReg = -1;
+
+    for (int i = vm.frameCount - 1; i >= 0; i--) {
+        CallFrame* frame = &vm.frames[i];
+        ObjFunction* fn = frame->closure->function;
+        int ip = (int)(frame->ip - fn->chunk.code) - 1;
+        ExceptionEntry* exceptions = fn->chunk.exceptions;
+        for (int e = fn->chunk.exceptionCount - 1; e >= 0; e--) {
+            ExceptionEntry* entry = &exceptions[e];
+            if (ip >= entry->start && ip < entry->end) {
+                if (i < vm.runBase) return -1;
+                if (IS_OBJ(message) &&
+                    (vm.gcPhase == GC_PHASE_MARK || vm.gcPhase == GC_PHASE_ATOMIC)) {
+                    markObject(AS_OBJ(message));
+                }
+                frame->slots[entry->catchReg] = message;
+                frame->ip = fn->chunk.code + entry->handler;
+                vm.frameCount = i + 1;
+                vm.pendingError = NIL_VAL;
+                return 1;
+            }
+        }
+    }
+    return 0;
+}
+
+static void uncaughtError(Value message) {
+    if (vm.errorPrinted) return;
+    vm.errorPrinted = true;
+
+    char buf[64];
+    const char* text = NULL;
+    int len = 0;
+    if (IS_STRING(message)) {
+        text = AS_STRING(message)->chars;
+        len = AS_STRING(message)->length;
+    } else if (IS_INTEGER(message)) {
+        len = snprintf(buf, sizeof(buf), "%lld", (long long)AS_INTEGER(message));
+        text = buf;
+    } else if (IS_NUMBER(message)) {
+        len = snprintf(buf, sizeof(buf), "%g", AS_NUMBER_NC(message));
+        text = buf;
+    } else if (IS_BOOL(message)) {
+        text = AS_BOOL(message) ? "true" : "false";
+        len = (int)strlen(text);
+    } else {
+        text = "error";
+        len = 4;
+    }
+    fwrite(text, 1, (size_t)len, stderr);
+    fputc('\n', stderr);
+
+    if (vm.frameCount > 0) {
+        fprintf(stderr, "stack traceback:\n");
+        for (int i = vm.frameCount - 1; i >= 0; i--) {
+            CallFrame* frame = &vm.frames[i];
+            ObjFunction* fn = frame->closure->function;
+            size_t instruction = frame->ip - fn->chunk.code - 1;
+            int line = fn->chunk.lines[instruction];
+            if (fn->name != NULL) {
+                fprintf(stderr, "  [line %d] in %s()\n", line, fn->name->chars);
+            } else if (i == 0) {
+                fprintf(stderr, "  [line %d] in script\n", line);
+            } else {
+                fprintf(stderr, "  [line %d] in <anonymous>\n", line);
+            }
+        }
+    }
+    resetStack();
+}
+
+void vmRaiseError(Value message) {
+    int r = raiseError(message);
+    if (r == 1) return;
+    if (r == -1) return;
+    uncaughtError(message);
+}
+
+void vmReRaiseError(void) {
+    int r = raiseError(vm.pendingError);
+    if (r == 1) return;
+    if (r == 0) uncaughtError(vm.pendingError);
+}
+
 // prints errors when the script does something dumb
 static void runtimeError(const char *format, ...)
 {
+    char buf[512];
     va_list args;
     va_start(args, format);
-    vfprintf(stderr, format, args);
+    vsnprintf(buf, sizeof(buf), format, args);
     va_end(args);
-    fputs("\n", stderr);
 
-    CallFrame *frame = &vm.frames[vm.frameCount - 1];
-    size_t instruction = frame->ip - frame->closure->function->chunk.code - 1;
-    int line = frame->closure->function->chunk.lines[instruction];
-    fprintf(stderr, "[line %d] in script\n", line);
-    resetStack();
+    Value message = OBJ_VAL(copyString(buf, (int)strlen(buf)));
+    int r = raiseError(message);
+    if (r == 1) return;
+    if (r == -1) return;
+    uncaughtError(message);
 }
 
 void initVM()
@@ -68,6 +157,9 @@ void initVM()
     vm.mmDiv      = copyString("__div", 5);
     vm.openString = NIL_VAL;
     vm.openStringReg = -1;
+    vm.pendingError = NIL_VAL;
+    vm.runBase = 0;
+    vm.errorPrinted = false;
     for (int i = 0; i < GLOBAL_CACHE_SIZE; i++) {
         vm.globalCache[i].name = NULL;
     }
@@ -272,7 +364,53 @@ static bool callBinaryMetamethod(Value handler, Value a, Value b,
     mf->ip = closure->function->chunk.code;
     mf->slots = scratch;
 
+    int savedRunBase = vm.runBase;
+    vm.runBase = base;
     InterpretResult r = run(base);
+    vm.runBase = savedRunBase;
+    if (r != INTERPRET_OK) return false;
+
+    *out = scratch[0];
+    return true;
+}
+
+static bool callUnaryMetamethod(Value handler, Value self, Value* scratch,
+                                Value* out) {
+    ObjClosure* closure;
+    if (IS_CLOSURE(handler)) {
+        closure = AS_CLOSURE(handler);
+    } else if (IS_FUNCTION(handler)) {
+        ObjFunction* function = AS_FUNCTION(handler);
+        closure = newClosure(function);
+        for (int i = 0; i < function->upvalueCount; i++) {
+            closure->upvalues[i] = NULL;
+        }
+    } else {
+        runtimeError("Metamethod must be a function.");
+        return false;
+    }
+    if (closure->function->arity != 1) {
+        runtimeError("Unary metamethod must take 1 argument.");
+        return false;
+    }
+    if (vm.frameCount >= FRAMES_MAX) {
+        runtimeError("Stack overflow.");
+        return false;
+    }
+
+    scratch[0] = handler;
+    scratch[1] = self;
+
+    int base = vm.frameCount;
+    CallFrame* mf = &vm.frames[vm.frameCount++];
+    mf->closure = closure;
+    mf->ip = closure->function->chunk.code;
+    mf->slots = scratch;
+
+    int savedRunBase = vm.runBase;
+    vm.runBase = base;
+    InterpretResult r = run(base);
+    vm.runBase = savedRunBase;
     if (r != INTERPRET_OK) return false;
 
     *out = scratch[0];
@@ -328,8 +466,15 @@ InterpretResult run(int baseFrame)
     if (!IS_NIL(_h)) { \
         Value* _scratch = FRAME.slots + FRAME.closure->function->maxRegs; \
         Value _res; \
-        if (!callBinaryMetamethod(_h, av, bv, _scratch, &_res)) \
+        if (!callBinaryMetamethod(_h, av, bv, _scratch, &_res)) { \
+            if (vm.pendingError == NIL_VAL) { RELOAD_FRAME(); DISPATCH_POLL(); } \
+            { \
+                int _rr = raiseError(vm.pendingError); \
+                if (_rr == 1) { RELOAD_FRAME(); DISPATCH_POLL(); } \
+                if (_rr == 0) uncaughtError(vm.pendingError); \
+            } \
             return INTERPRET_RUNTIME_ERROR; \
+        } \
         REG_SET(GET_A(inst), _res); \
         DISPATCH_POLL(); \
     } \
@@ -350,7 +495,8 @@ InterpretResult run(int baseFrame)
             REG_SET(GET_A(inst), NUMBER_VAL(da op db));              \
         } else {                                                     \
             runtimeError("Operands must be numbers.");               \
-            return INTERPRET_RUNTIME_ERROR;                          \
+            if (vm.pendingError != NIL_VAL) return INTERPRET_RUNTIME_ERROR; \
+            RELOAD_FRAME();                                          \
         }                                                            \
     } while (false)
 
@@ -417,6 +563,8 @@ InterpretResult run(int baseFrame)
         [OP_NOT_EQUAL] = &&OP_NOT_EQUAL,
 [OP_SQRT] = &&OP_SQRT,
         [OP_FOR_IN] = &&OP_FOR_IN,
+        [OP_TRY] = &&OP_TRY,
+        [OP_ENDTRY] = &&OP_ENDTRY,
     };
 
     uint32_t instruction;
@@ -471,10 +619,14 @@ InterpretResult run(int baseFrame)
             uint32_t inst = FRAME.ip[-1];
             Value bv = REG(GET_C(inst));
             Value av = REG(GET_B(inst));
-            if (av == vm.openString && GET_B(inst) == vm.openStringReg) {
+            if (av == vm.openString && GET_B(inst) == vm.openStringReg
+                && GET_A(inst) == GET_B(inst)) {
                 ObjString* strA = AS_STRING(av);
                 if (IS_STRING(bv)) {
                     ObjString* strB = AS_STRING(bv);
+                    if (strB == strA) {
+                        goto OP_ADD;
+                    }
                     int length = strA->length + strB->length;
                     if (length > strA->capacity) {
                         int newCap = strA->capacity < 64 ? 64 : strA->capacity * 2;
@@ -527,7 +679,7 @@ InterpretResult run(int baseFrame)
 #ifdef __GNUC__
             goto OP_ADD;
 #else
-            /* falls through to OP_ADD */
+            /* falls through */
 #endif
         }
 
@@ -607,7 +759,8 @@ InterpretResult run(int baseFrame)
             } else {
                 TRY_BINARY_META(vm.mmAdd);
                 runtimeError("Operands must be numbers or strings.");
-                return INTERPRET_RUNTIME_ERROR;
+                if (vm.pendingError != NIL_VAL) return INTERPRET_RUNTIME_ERROR;
+                RELOAD_FRAME();
             }
 #ifdef __GNUC__
             DISPATCH_POLL();
@@ -638,7 +791,8 @@ InterpretResult run(int baseFrame)
             } else {
                 TRY_BINARY_META(vm.mmSub);
                 runtimeError("Operands must be numbers.");
-                return INTERPRET_RUNTIME_ERROR;
+                if (vm.pendingError != NIL_VAL) return INTERPRET_RUNTIME_ERROR;
+                RELOAD_FRAME();
             }
             DISPATCH_POLL();
         }
@@ -664,7 +818,8 @@ InterpretResult run(int baseFrame)
             } else {
                 TRY_BINARY_META(vm.mmMul);
                 runtimeError("Operands must be numbers.");
-                return INTERPRET_RUNTIME_ERROR;
+                if (vm.pendingError != NIL_VAL) return INTERPRET_RUNTIME_ERROR;
+                RELOAD_FRAME();
             }
             DISPATCH_POLL();
         }
@@ -681,7 +836,8 @@ InterpretResult run(int baseFrame)
             } else {
                 TRY_BINARY_META(vm.mmDiv);
                 runtimeError("Operands must be numbers.");
-                return INTERPRET_RUNTIME_ERROR;
+                if (vm.pendingError != NIL_VAL) return INTERPRET_RUNTIME_ERROR;
+                RELOAD_FRAME();
             }
             DISPATCH_POLL();
         }
@@ -704,7 +860,8 @@ InterpretResult run(int baseFrame)
                 REG(GET_A(inst)) = NUMBER_VAL(AS_NUMBER(a) - AS_NUMBER(b));
             } else {
                 runtimeError("Operands must be numbers.");
-                return INTERPRET_RUNTIME_ERROR;
+                if (vm.pendingError != NIL_VAL) return INTERPRET_RUNTIME_ERROR;
+                RELOAD_FRAME();
             }
             break;
         }
@@ -724,7 +881,8 @@ InterpretResult run(int baseFrame)
                 REG(GET_A(inst)) = NUMBER_VAL(AS_NUMBER(a) * AS_NUMBER(b));
             } else {
                 runtimeError("Operands must be numbers.");
-                return INTERPRET_RUNTIME_ERROR;
+                if (vm.pendingError != NIL_VAL) return INTERPRET_RUNTIME_ERROR;
+                RELOAD_FRAME();
             }
             break;
         }
@@ -739,7 +897,13 @@ InterpretResult run(int baseFrame)
                 int64_t ib = AS_INTEGER(b);
                 if (ib == 0) {
                     runtimeError("Division by zero.");
-                    return INTERPRET_RUNTIME_ERROR;
+                    if (vm.pendingError != NIL_VAL) return INTERPRET_RUNTIME_ERROR;
+                    RELOAD_FRAME();
+#ifdef __GNUC__
+                    DISPATCH_POLL();
+#else
+                    break;
+#endif
                 }
                 int64_t ia = AS_INTEGER(a);
                 if (ia == INT64_MIN && ib == -1) {
@@ -751,7 +915,8 @@ InterpretResult run(int baseFrame)
                 REG(GET_A(inst)) = NUMBER_VAL(fmod(AS_NUMBER(a), AS_NUMBER(b)));
             } else {
                 runtimeError("Operands must be numbers.");
-                return INTERPRET_RUNTIME_ERROR;
+                if (vm.pendingError != NIL_VAL) return INTERPRET_RUNTIME_ERROR;
+                RELOAD_FRAME();
             }
 #ifdef __GNUC__
             DISPATCH_POLL();
@@ -809,7 +974,8 @@ InterpretResult run(int baseFrame)
                 REG(GET_A(inst)) = BOOL_VAL(AS_NUMBER(a) > AS_NUMBER(b));
             } else {
                 runtimeError("Operands must be numbers.");
-                return INTERPRET_RUNTIME_ERROR;
+                if (vm.pendingError != NIL_VAL) return INTERPRET_RUNTIME_ERROR;
+                RELOAD_FRAME();
             }
 #ifdef __GNUC__
             DISPATCH();
@@ -833,7 +999,8 @@ InterpretResult run(int baseFrame)
                 REG(GET_A(inst)) = BOOL_VAL(AS_NUMBER(a) < AS_NUMBER(b));
             } else {
                 runtimeError("Operands must be numbers.");
-                return INTERPRET_RUNTIME_ERROR;
+                if (vm.pendingError != NIL_VAL) return INTERPRET_RUNTIME_ERROR;
+                RELOAD_FRAME();
             }
 #ifdef __GNUC__
             DISPATCH();
@@ -857,7 +1024,8 @@ InterpretResult run(int baseFrame)
                 REG(GET_A(inst)) = BOOL_VAL(AS_NUMBER(a) >= AS_NUMBER(b));
             } else {
                 runtimeError("Operands must be numbers.");
-                return INTERPRET_RUNTIME_ERROR;
+                if (vm.pendingError != NIL_VAL) return INTERPRET_RUNTIME_ERROR;
+                RELOAD_FRAME();
             }
 #ifdef __GNUC__
             DISPATCH();
@@ -881,7 +1049,8 @@ InterpretResult run(int baseFrame)
                 REG(GET_A(inst)) = BOOL_VAL(AS_NUMBER(a) <= AS_NUMBER(b));
             } else {
                 runtimeError("Operands must be numbers.");
-                return INTERPRET_RUNTIME_ERROR;
+                if (vm.pendingError != NIL_VAL) return INTERPRET_RUNTIME_ERROR;
+                RELOAD_FRAME();
             }
 #ifdef __GNUC__
             DISPATCH();
@@ -940,16 +1109,44 @@ InterpretResult run(int baseFrame)
                 REG_SET(dest, INTEGER_VAL(AS_STRING(val)->length));
             } else if (IS_TABLE(val)) {
                 ObjTable* table = AS_TABLE(val);
+                Value lenValue = NIL_VAL;
                 if (table->metatable != NULL) {
                     ObjTable* mt = table->metatable;
                     if (mt->metaGen == mt->writeGen && !IS_NIL(mt->cachedLen)) {
-                    } else {
-                        Value lenValue;
-                        if (tableGet(&mt->fields, OBJ_VAL((Obj*)vm.mmLen), &lenValue)) {
-                            mt->cachedLen = lenValue;
-                            mt->metaGen = mt->writeGen;
-                        }
+                        lenValue = mt->cachedLen;
+                    } else if (tableGet(&mt->fields, OBJ_VAL((Obj*)vm.mmLen), &lenValue)) {
+                        mt->cachedLen = lenValue;
+                        mt->metaGen = mt->writeGen;
                     }
+                }
+                if (IS_CLOSURE(lenValue) || IS_FUNCTION(lenValue)) {
+#ifdef __GNUC__
+                    Value* scratch = FRAME.slots + FRAME.closure->function->maxRegs;
+                    Value lenResult;
+                    if (callUnaryMetamethod(lenValue, val, scratch, &lenResult)) {
+                        REG_SET(dest, lenResult);
+                        DISPATCH_POLL();
+                    } else if (vm.pendingError == NIL_VAL) {
+                        RELOAD_FRAME();
+                        DISPATCH_POLL();
+                    } else {
+                        int rr = raiseError(vm.pendingError);
+                        if (rr == 1) { RELOAD_FRAME(); DISPATCH_POLL(); }
+                        if (rr == 0) uncaughtError(vm.pendingError);
+                    }
+                    return INTERPRET_RUNTIME_ERROR;
+#else
+                    /* __len metamethod invocation not supported on this platform */
+#endif
+                } else if (!IS_NIL(lenValue)) {
+                    runtimeError("__len metamethod must be a function.");
+                    if (vm.pendingError != NIL_VAL) return INTERPRET_RUNTIME_ERROR;
+                    RELOAD_FRAME();
+#ifdef __GNUC__
+                    DISPATCH_POLL();
+#else
+                    break;
+#endif
                 }
                 int len = table->arrayCapacity;
                 while (len > 0 && IS_NIL(table->array[len - 1])) {
@@ -958,7 +1155,8 @@ InterpretResult run(int baseFrame)
                 REG_SET(dest, INTEGER_VAL(len));
             } else {
                 runtimeError("Operand must be a table.");
-                return INTERPRET_RUNTIME_ERROR;
+                if (vm.pendingError != NIL_VAL) return INTERPRET_RUNTIME_ERROR;
+                RELOAD_FRAME();
             }
 #ifdef __GNUC__
             DISPATCH_POLL();
@@ -983,7 +1181,13 @@ InterpretResult run(int baseFrame)
             vm.openStringReg = -1;
             if (!IS_TABLE(REG(tableReg))) {
                 runtimeError("Can only iterate over tables.");
-                return INTERPRET_RUNTIME_ERROR;
+                if (vm.pendingError != NIL_VAL) return INTERPRET_RUNTIME_ERROR;
+                RELOAD_FRAME();
+#ifdef __GNUC__
+                DISPATCH_POLL();
+#else
+                break;
+#endif
             }
             ObjTable* table = AS_TABLE(REG(tableReg));
 
@@ -1026,6 +1230,34 @@ InterpretResult run(int baseFrame)
         }
 
 #ifdef __GNUC__
+        OP_TRY:
+#else
+        case OP_TRY:
+#endif
+        {
+            /* marker */
+#ifdef __GNUC__
+            DISPATCH_POLL();
+#else
+            break;
+#endif
+        }
+
+#ifdef __GNUC__
+        OP_ENDTRY:
+#else
+        case OP_ENDTRY:
+#endif
+        {
+            /* marker */
+#ifdef __GNUC__
+            DISPATCH_POLL();
+#else
+            break;
+#endif
+        }
+
+#ifdef __GNUC__
         OP_SET_METATABLE:
 #else
         case OP_SET_METATABLE:
@@ -1037,7 +1269,13 @@ InterpretResult run(int baseFrame)
             Value mtVal = REG(mtReg);
             if (!IS_TABLE(tableVal)) {
                 runtimeError("First argument must be a table.");
-                return INTERPRET_RUNTIME_ERROR;
+                if (vm.pendingError != NIL_VAL) return INTERPRET_RUNTIME_ERROR;
+                RELOAD_FRAME();
+#ifdef __GNUC__
+                DISPATCH_POLL();
+#else
+                break;
+#endif
             }
             ObjTable* table = AS_TABLE(tableVal);
             if (IS_TABLE(mtVal)) {
@@ -1047,7 +1285,8 @@ InterpretResult run(int baseFrame)
                 table->metatable = NULL;
             } else {
                 runtimeError("Metatable must be a table or nil.");
-                return INTERPRET_RUNTIME_ERROR;
+                if (vm.pendingError != NIL_VAL) return INTERPRET_RUNTIME_ERROR;
+                RELOAD_FRAME();
             }
 #ifdef __GNUC__
             DISPATCH();
@@ -1076,7 +1315,8 @@ InterpretResult run(int baseFrame)
                 }
             } else {
                 runtimeError("Operand must be a table.");
-                return INTERPRET_RUNTIME_ERROR;
+                if (vm.pendingError != NIL_VAL) return INTERPRET_RUNTIME_ERROR;
+                RELOAD_FRAME();
             }
 #ifdef __GNUC__
             DISPATCH();
@@ -1099,7 +1339,6 @@ InterpretResult run(int baseFrame)
             vm.openString = NIL_VAL;
             vm.openStringReg = -1;
 
-            // Inline cache check (per-chunk, indexed by instruction position)
             Chunk* chunk = &FRAME.closure->function->chunk;
             int instIdx = (int)(FRAME.ip - 1 - chunk->code);
             InlineCache* ic = &chunk->caches[instIdx];
@@ -1117,7 +1356,13 @@ InterpretResult run(int baseFrame)
 
             if (!IS_TABLE(tableVal)) {
                 runtimeError("Can only index into tables.");
-                return INTERPRET_RUNTIME_ERROR;
+                if (vm.pendingError != NIL_VAL) return INTERPRET_RUNTIME_ERROR;
+                RELOAD_FRAME();
+#ifdef __GNUC__
+                DISPATCH_POLL();
+#else
+                break;
+#endif
             }
 
             ObjTable* table = AS_TABLE(tableVal);
@@ -1139,7 +1384,8 @@ InterpretResult run(int baseFrame)
                 found = objTableGet(table, keyVal, &result);
             } else {
                 runtimeError("Table key must be a number or string.");
-                return INTERPRET_RUNTIME_ERROR;
+                if (vm.pendingError != NIL_VAL) return INTERPRET_RUNTIME_ERROR;
+                RELOAD_FRAME();
             }
 
             if (!found && table->metatable != NULL) {
@@ -1206,10 +1452,18 @@ InterpretResult run(int baseFrame)
             Value tableVal = REG(tableReg);
             Value keyVal = normalizeNumericKey(REG(keyReg));
             Value value = REG(valReg);
+            vm.openString = NIL_VAL;
+            vm.openStringReg = -1;
 
             if (!IS_TABLE(tableVal)) {
                 runtimeError("Can only index into tables.");
-                return INTERPRET_RUNTIME_ERROR;
+                if (vm.pendingError != NIL_VAL) return INTERPRET_RUNTIME_ERROR;
+                RELOAD_FRAME();
+#ifdef __GNUC__
+                DISPATCH_POLL();
+#else
+                break;
+#endif
             }
 
             ObjTable* table = AS_TABLE(tableVal);
@@ -1275,7 +1529,8 @@ InterpretResult run(int baseFrame)
                 int64_t index = AS_INTEGER(keyVal);
                 if (index < 1) {
                     runtimeError("Table index must be >= 1.");
-                    return INTERPRET_RUNTIME_ERROR;
+                    if (vm.pendingError != NIL_VAL) return INTERPRET_RUNTIME_ERROR;
+                    RELOAD_FRAME();
                 }
                 if (index <= table->arrayCapacity) {
                     GC_WRITE_BARRIER(value);
@@ -1299,7 +1554,8 @@ InterpretResult run(int baseFrame)
                 tableSet(&table->fields, keyVal, value);
             } else {
                 runtimeError("Table key must be a number or string.");
-                return INTERPRET_RUNTIME_ERROR;
+                if (vm.pendingError != NIL_VAL) return INTERPRET_RUNTIME_ERROR;
+                RELOAD_FRAME();
             }
 #ifdef __GNUC__
             DISPATCH_POLL();
@@ -1351,7 +1607,8 @@ InterpretResult run(int baseFrame)
                 REG(GET_A(instruction)) = NUMBER_VAL(-AS_NUMBER(val));
             } else {
                 runtimeError("Operand must be a number.");
-                return INTERPRET_RUNTIME_ERROR;
+                if (vm.pendingError != NIL_VAL) return INTERPRET_RUNTIME_ERROR;
+                RELOAD_FRAME();
             }
 #ifdef __GNUC__
             DISPATCH();
@@ -1397,7 +1654,8 @@ InterpretResult run(int baseFrame)
                 REG(GET_A(instruction)) = NUMBER_VAL(valueToNumber(val) + 1.0);
             } else {
                 runtimeError("Operand must be a number.");
-                return INTERPRET_RUNTIME_ERROR;
+                if (vm.pendingError != NIL_VAL) return INTERPRET_RUNTIME_ERROR;
+                RELOAD_FRAME();
             }
 #ifdef __GNUC__
             DISPATCH();
@@ -1429,6 +1687,8 @@ InterpretResult run(int baseFrame)
 #endif
         {
             ObjString *name = AS_STRING(READ_CONSTANT(instruction));
+            vm.openString = NIL_VAL;
+            vm.openStringReg = -1;
             tableSet(&vm.globals, OBJ_VAL((Obj*)name), REG(GET_A(instruction)));
 #ifdef __GNUC__
             DISPATCH_POLL();
@@ -1459,7 +1719,13 @@ InterpretResult run(int baseFrame)
             if (entry == NULL)
             {
                 runtimeError("Undefined variable '%s'.", name->chars);
-                return INTERPRET_RUNTIME_ERROR;
+                if (vm.pendingError != NIL_VAL) return INTERPRET_RUNTIME_ERROR;
+                RELOAD_FRAME();
+#ifdef __GNUC__
+                DISPATCH_POLL();
+#else
+                break;
+#endif
             }
             gc->name = name;
             gc->generation = vm.globals.generation;
@@ -1481,6 +1747,8 @@ InterpretResult run(int baseFrame)
             ObjString *name = AS_STRING(READ_CONSTANT(instruction));
             Value newVal = REG(GET_A(instruction));
             GlobalCacheEntry* gc = &vm.globalCache[(name->hash) & (GLOBAL_CACHE_SIZE - 1)];
+            vm.openString = NIL_VAL;
+            vm.openStringReg = -1;
             if (gc->name == name && gc->generation == vm.globals.generation) {
                 gc->entry->value = newVal;
                 gcWriteBarrier(newVal);
@@ -1494,7 +1762,13 @@ InterpretResult run(int baseFrame)
             if (entry == NULL)
             {
                 runtimeError("Undefined variable '%s'.", name->chars);
-                return INTERPRET_RUNTIME_ERROR;
+                if (vm.pendingError != NIL_VAL) return INTERPRET_RUNTIME_ERROR;
+                RELOAD_FRAME();
+#ifdef __GNUC__
+                DISPATCH_POLL();
+#else
+                break;
+#endif
             }
             gc->name = name;
             gc->generation = vm.globals.generation;
@@ -1552,6 +1826,8 @@ InterpretResult run(int baseFrame)
         {
             int slot = GET_A(instruction);
             Value upvVal = REG(GET_B(instruction));
+            vm.openString = NIL_VAL;
+            vm.openStringReg = -1;
             GC_WRITE_BARRIER(upvVal);
             *FRAME.closure->upvalues[slot]->location = upvVal;
 #ifdef __GNUC__
@@ -1573,6 +1849,9 @@ InterpretResult run(int baseFrame)
 
             FRAME.slots[0] = result;
             GC_WRITE_BARRIER(result);
+
+            vm.openString = NIL_VAL;
+            vm.openStringReg = -1;
 
             vm.frameCount--;
             if (vm.frameCount == baseFrame)
@@ -1942,7 +2221,13 @@ InterpretResult run(int baseFrame)
             int64_t ib = AS_INTEGER(REG(GET_C(instruction)));
             if (ib == 0) {
                 runtimeError("Division by zero.");
-                return INTERPRET_RUNTIME_ERROR;
+                if (vm.pendingError != NIL_VAL) return INTERPRET_RUNTIME_ERROR;
+                RELOAD_FRAME();
+#ifdef __GNUC__
+                DISPATCH_POLL();
+#else
+                break;
+#endif
             }
             int64_t ia = AS_INTEGER(REG(GET_B(instruction)));
             if (ia == INT64_MIN && ib == -1) {
@@ -1970,7 +2255,8 @@ InterpretResult run(int baseFrame)
                 REG_SET(GET_A(instruction), NUMBER_VAL(sqrt(AS_NUMBER(v))));
             } else {
                 runtimeError("Operand must be a number.");
-                return INTERPRET_RUNTIME_ERROR;
+                if (vm.pendingError != NIL_VAL) return INTERPRET_RUNTIME_ERROR;
+                RELOAD_FRAME();
             }
 #ifdef __GNUC__
             DISPATCH();
@@ -2021,10 +2307,13 @@ InterpretResult run(int baseFrame)
                  if (native->arity >= 0 && argCount != native->arity) {
                      runtimeError("Expected %d arguments but got %d.",
                                   native->arity, argCount);
-                     return INTERPRET_RUNTIME_ERROR;
+                     if (vm.pendingError != NIL_VAL) return INTERPRET_RUNTIME_ERROR;
+                     RELOAD_FRAME();
                  }
                  Value result;
                  native->function(argCount, &REG(reg + 1), &result);
+                 if (vm.pendingError != NIL_VAL) return INTERPRET_RUNTIME_ERROR;
+                 RELOAD_FRAME();
                  REG_SET(reg, result);
 #ifdef __GNUC__
                  DISPATCH_POLL();
@@ -2048,34 +2337,72 @@ InterpretResult run(int baseFrame)
                       }
                       if (IS_CLOSURE(callValue)) {
                           closure = AS_CLOSURE(callValue);
+                          REG_SET(reg, callValue);
                       } else if (IS_FUNCTION(callValue)) {
                           ObjFunction* function = AS_FUNCTION(callValue);
                           closure = newClosure(function);
+                          REG_SET(reg, OBJ_VAL(closure));
                           for (int i = 0; i < function->upvalueCount; i++) {
                               closure->upvalues[i] = NULL;
                           }
                       } else {
                           runtimeError("Attempt to call a table without __call metamethod.");
-                          return INTERPRET_RUNTIME_ERROR;
+                          if (vm.pendingError != NIL_VAL) return INTERPRET_RUNTIME_ERROR;
+                          RELOAD_FRAME();
+#ifdef __GNUC__
+                          DISPATCH_POLL();
+#else
+                          break;
+#endif
                       }
+                      /* __call receives the table as self */
+                      for (int i = argCount; i >= 1; i--) {
+                          REG(reg + i + 1) = REG(reg + i);
+                      }
+                      REG_SET(reg + 1, callee);
+                      argCount++;
                  } else {
                      runtimeError("Attempt to call a table without metatable.");
-                     return INTERPRET_RUNTIME_ERROR;
+                     if (vm.pendingError != NIL_VAL) return INTERPRET_RUNTIME_ERROR;
+                     RELOAD_FRAME();
+#ifdef __GNUC__
+                     DISPATCH_POLL();
+#else
+                     break;
+#endif
                  }
              } else {
                  runtimeError("Can only call functions.");
-                 return INTERPRET_RUNTIME_ERROR;
+                 if (vm.pendingError != NIL_VAL) return INTERPRET_RUNTIME_ERROR;
+                 RELOAD_FRAME();
+#ifdef __GNUC__
+                 DISPATCH_POLL();
+#else
+                 break;
+#endif
              }
 
              if (argCount != closure->function->arity) {
                  runtimeError("Expected %d arguments but got %d.",
                               closure->function->arity, argCount);
-                 return INTERPRET_RUNTIME_ERROR;
+                 if (vm.pendingError != NIL_VAL) return INTERPRET_RUNTIME_ERROR;
+                 RELOAD_FRAME();
+#ifdef __GNUC__
+                 DISPATCH_POLL();
+#else
+                 break;
+#endif
              }
 
              if (vm.frameCount >= FRAMES_MAX) {
                  runtimeError("Stack overflow.");
-                 return INTERPRET_RUNTIME_ERROR;
+                 if (vm.pendingError != NIL_VAL) return INTERPRET_RUNTIME_ERROR;
+                 RELOAD_FRAME();
+#ifdef __GNUC__
+                 DISPATCH_POLL();
+#else
+                 break;
+#endif
              }
 
              CallFrame *nextFrame = &vm.frames[vm.frameCount];
@@ -2101,6 +2428,8 @@ InterpretResult run(int baseFrame)
         {
             ObjFunction* function = AS_FUNCTION(READ_CONSTANT(instruction));
             ObjClosure* closure = newClosure(function);
+            vm.openString = NIL_VAL;
+            vm.openStringReg = -1;
             REG(GET_A(instruction)) = OBJ_VAL(closure);
 
             for (int i = 0; i < function->upvalueCount; i++) {

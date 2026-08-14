@@ -137,6 +137,7 @@ void markRoots() {
     markObject((Obj*)vm.mmMul);
     markObject((Obj*)vm.mmDiv);
     if (vm.openString != NIL_VAL) markValue(vm.openString);
+    if (vm.pendingError != NIL_VAL) markValue(vm.pendingError);
 
     for (int i = 0; i < vm.strings.capacity; i++) {
         Entry* entry = &vm.strings.entries[i];

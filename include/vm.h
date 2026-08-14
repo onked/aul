@@ -35,8 +35,7 @@ typedef enum {
 
 typedef struct {
     struct Obj* objects;
-    struct Obj* newObjects; // objects born during GC_PHASE_SWEEP; spliced in on completion
-    // Array-based gray stack so we don't corrupt the vm.objects linked list
+    struct Obj* newObjects;
     struct Obj** grayStack;
     int grayCount;
     int grayCapacity;
@@ -72,10 +71,13 @@ typedef struct {
     struct ObjString* mmMul;
     struct ObjString* mmDiv;
 
-    // Last string concatenation result and the register holding it.
-    // OP_ADD_BUF may append in place only when both match (exclusive temp flow).
     Value openString;
     int openStringReg;
+
+
+    Value pendingError;
+    int runBase;
+    bool errorPrinted;
 
     GlobalCacheEntry globalCache[GLOBAL_CACHE_SIZE];
 } VM;
@@ -92,6 +94,8 @@ void initVM();
 void freeVM();
 InterpretResult interpret(const char* source);
 InterpretResult run(int baseFrame);
+void vmRaiseError(Value message);
+void vmReRaiseError(void);
 void gcStep(void);
 void barrierBack(struct Obj* obj);
 

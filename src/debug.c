@@ -155,6 +155,14 @@ int disassembleInstruction(Chunk *chunk, int offset) {
             printf("%-16s %4d %4d\n", "OP_FOR_IN", a, jOffset);
             return offset + 1;
         }
+        case OP_TRY: {
+            uint8_t a = GET_A(instruction);
+            int16_t jOffset = (int16_t)GET_Bx(instruction);
+            printf("%-16s %4d %4d -> %d\n", "OP_TRY", a, jOffset, offset + 1 + jOffset);
+            return offset + 1;
+        }
+        case OP_ENDTRY:
+            return simpleRegister("OP_ENDTRY", instruction, offset);
         case OP_SET_METATABLE:
             return abcInstruction("OP_SET_METATABLE", instruction, offset);
         case OP_GET_METATABLE:

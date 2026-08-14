@@ -10,6 +10,7 @@
 static void ifStatement(void);
 static void whileStatement(void);
 static void forStatement(void);
+static void tryStatement(void);
 static void breakStatement(void);
 static void continueStatement(void);
 
@@ -157,7 +158,6 @@ int call(int leftReg) {
     emitABC(OP_MOVE, callReg, leftReg, 0);
 
     int argCount = 0;
-    // arguments start at the next register after the function
     int nextArgSlot = callReg + 1; 
 
     if (!check(TOKEN_RIGHT_PAREN)) {
@@ -173,7 +173,6 @@ int call(int leftReg) {
     }
     consume(TOKEN_RIGHT_PAREN, "Expect ')' after function arguments.");
 
-    // emit the call instruction with the function register and argument count
     emitABC(OP_CALL, callReg, argCount, 0);
 
     int callMinFree = current->maxRegister + 1;
@@ -390,17 +389,11 @@ static void forInStatement(Token keyVar, Token valueVar, int varCount) {
     consume(TOKEN_RIGHT_PAREN, "Expect ')' after iteration table.");
     consume(TOKEN_LEFT_BRACE, "Expect '{' before for body.");
     
-    // The VM derives key/value/cursor from tableReg+1/+2/+3, so the table
-    // must live in a register with three free slots after it. A local could
-    // sit right after the table's register, so copy the table into a fresh
-    // temp first.
     int tmpTableReg = allocateRegister();
     emitABC(OP_MOVE, tmpTableReg, tableReg, 0);
     int keyReg = allocateRegister();
     int valueReg = allocateRegister();
     int cursorReg = allocateRegister();
-    // The VM resumes iteration from the cursor register on every FOR_IN
-    // execution, including the first, so it must be initialized.
     emitABx(OP_CONSTANT, cursorReg, makeConstant(INTEGER_VAL(0)));
     
     addLocal(valueVar, valueReg);
@@ -467,6 +460,49 @@ static void continueStatement() {
     match(TOKEN_SEMICOLON);
 }
 
+static void tryStatement() {
+    consume(TOKEN_LEFT_BRACE, "Expect '{' before try body.");
+
+    int tryPos = compilingChunk->count;
+    emitABx(OP_TRY, 0, 0);
+
+    while (!check(TOKEN_RIGHT_BRACE) && !check(TOKEN_EOF)) {
+        declaration();
+    }
+    consume(TOKEN_RIGHT_BRACE, "Expect '}' after try body.");
+
+    emitABC(OP_ENDTRY, 0, 0, 0);
+
+    int skipJump = emitJump(OP_JUMP);
+
+    if (!match(TOKEN_CATCH)) {
+        errorAt(&parser.previous, "Expect 'catch' after try body.");
+    }
+    consume(TOKEN_LEFT_PAREN, "Expect '(' after 'catch'.");
+    consume(TOKEN_IDENTIFIER, "Expect catch variable name.");
+    Token catchVar = parser.previous;
+    consume(TOKEN_RIGHT_PAREN, "Expect ')' after catch variable.");
+    consume(TOKEN_LEFT_BRACE, "Expect '{' before catch body.");
+
+    int handlerPos = compilingChunk->count;
+
+    int catchReg = allocateRegister();
+    addLocal(catchVar, catchReg);
+
+    while (!check(TOKEN_RIGHT_BRACE) && !check(TOKEN_EOF)) {
+        declaration();
+    }
+    consume(TOKEN_RIGHT_BRACE, "Expect '}' after catch body.");
+
+    patchJump(skipJump);
+
+    int handlerOffset = handlerPos - tryPos - 1;
+    if (handlerOffset > 65535) {
+        errorAt(&parser.previous, "Too much code in try body.");
+    }
+    compilingChunk->code[tryPos] = CREATE_ABx(OP_TRY, catchReg, (uint16_t)handlerOffset);
+}
+
 void statement() {
     expression();
     match(TOKEN_SEMICOLON);
@@ -500,6 +536,8 @@ void declaration() {
         breakStatement();
     } else if (match(TOKEN_CONTINUE)) {
         continueStatement();
+    } else if (match(TOKEN_TRY)) {
+        tryStatement();
     } else {
         statement();
     }

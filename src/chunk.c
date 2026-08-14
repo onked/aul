@@ -9,6 +9,9 @@ void initChunk(Chunk* chunk) {
     chunk->code = NULL;
     chunk->lines = NULL;
     chunk->caches = NULL;
+    chunk->exceptions = NULL;
+    chunk->exceptionCount = 0;
+    chunk->exceptionCapacity = 0;
     initValueArray(&chunk->constants);
 }
 
@@ -35,6 +38,7 @@ void freeChunk(Chunk* chunk) {
     reallocate(chunk->code, sizeof(uint32_t) * chunk->capacity, 0);
     reallocate(chunk->lines, sizeof(int) * chunk->capacity, 0);
     reallocate(chunk->caches, sizeof(InlineCache) * chunk->capacity, 0);
+    reallocate(chunk->exceptions, sizeof(ExceptionEntry) * chunk->exceptionCapacity, 0);
     freeValueArray(&chunk->constants);
     initChunk(chunk);
 }
@@ -45,4 +49,19 @@ int addConstant(Chunk* chunk, Value value) {
     }
     writeValueArray(&chunk->constants, value);
     return chunk->constants.count - 1;
+}
+
+void writeException(Chunk* chunk, int start, int end, int handler, uint8_t catchReg) {
+    if (chunk->exceptionCapacity < chunk->exceptionCount + 1) {
+        int oldCapacity = chunk->exceptionCapacity;
+        chunk->exceptionCapacity = (oldCapacity < 4) ? 4 : oldCapacity * 2;
+        chunk->exceptions = reallocate(chunk->exceptions,
+            sizeof(ExceptionEntry) * oldCapacity,
+            sizeof(ExceptionEntry) * chunk->exceptionCapacity);
+    }
+    ExceptionEntry* entry = &chunk->exceptions[chunk->exceptionCount++];
+    entry->start = start;
+    entry->end = end;
+    entry->handler = handler;
+    entry->catchReg = catchReg;
 }

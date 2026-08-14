@@ -13,6 +13,13 @@ typedef struct InlineCache {
     Value result;
 } InlineCache;
 
+typedef struct {
+    int start;
+    int end;
+    int handler;
+    uint8_t catchReg;
+} ExceptionEntry;
+
 typedef enum {
     OP_CONSTANT,
     OP_DEFINE_GLOBAL,
@@ -75,6 +82,8 @@ typedef enum {
     OP_NOT_EQUAL,
     OP_SQRT,
     OP_FOR_IN,
+    OP_TRY,
+    OP_ENDTRY,
 } OpCode;
 
 typedef struct {
@@ -84,6 +93,9 @@ typedef struct {
     int* lines;
     ValueArray constants;
     struct InlineCache* caches;
+    ExceptionEntry* exceptions;
+    int exceptionCount;
+    int exceptionCapacity;
 } Chunk;
 
 #define CREATE_ABC(op, a, b, c) ((uint32_t)(((op) & 0xFF) | ((a) << 8) | ((b) << 16) | ((c) << 24)))
@@ -99,5 +111,6 @@ void initChunk(Chunk* chunk);
 void writeChunk(Chunk* chunk, uint32_t instruction, int line);
 void freeChunk(Chunk* chunk);
 int addConstant(Chunk* chunk, Value value);
+void writeException(Chunk* chunk, int start, int end, int handler, uint8_t catchReg);
 
 #endif

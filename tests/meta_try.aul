@@ -1,0 +1,99 @@
+loc t1 = {};
+loc mt1 = {};
+mt1["__add"] = func(a, b) {
+    error("meta add boom");
+};
+setmetatable(t1, mt1);
+
+try {
+    loc r = t1 + 5;
+    print("SHOULD NOT PRINT");
+} catch (e) {
+    print("meta caught: " + e);
+}
+
+loc t2 = {};
+loc mt2 = {};
+mt2["__add"] = func(a, b) { return 99; };
+setmetatable(t2, mt2);
+try {
+    loc r = t2 + 5;
+    print("meta ok: " + r);
+} catch (e) {
+    print("SHOULD NOT PRINT");
+}
+
+loc t3 = {};
+loc mt3 = {};
+mt3["__sub"] = func(a, b) {
+    error("meta sub boom");
+};
+setmetatable(t3, mt3);
+
+try {
+    loc n = t3 - 5;
+    print("SHOULD NOT PRINT");
+} catch (e) {
+    print("sub caught: " + e);
+}
+
+loc t4 = {};
+loc mt4 = {};
+mt4["__call"] = func(self, x) {
+    error("meta call boom " + x);
+};
+setmetatable(t4, mt4);
+
+try {
+    t4(1);
+    print("SHOULD NOT PRINT");
+} catch (e) {
+    print("call caught: " + e);
+}
+
+loc t5 = {};
+setmetatable(t5, {});
+
+try {
+    t5(1);
+    print("SHOULD NOT PRINT");
+} catch (e) {
+    print("call2 caught: " + e);
+}
+
+-- __call receives the table as self (was: arity mismatch)
+loc t6 = {};
+loc mt6 = {};
+mt6["__call"] = func(self, a, b) {
+    return a + b + self["base"];
+};
+setmetatable(t6, mt6);
+t6["base"] = 100;
+print("call self: " + t6(3, 4));
+
+-- __len metamethod is invoked (was: looked up but never called)
+loc t7 = {};
+loc mt7 = {};
+mt7["__len"] = func(self) {
+    error("meta len boom");
+};
+setmetatable(t7, mt7);
+
+try {
+    loc n = #t7;
+    print("SHOULD NOT PRINT");
+} catch (e) {
+    print("len caught: " + e);
+}
+
+loc t8 = {};
+loc mt8 = {};
+mt8["__len"] = func(self) {
+    return self["size"];
+};
+setmetatable(t8, mt8);
+t8["size"] = 7;
+print("len meta: " + #t8);
+print("plain len: " + #{"a", "b", "c"});
+
+print("META TESTS COMPLETE");

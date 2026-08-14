@@ -202,6 +202,10 @@ void specializeTypes(Chunk* chunk) {
                 isInt[a + 2] = 0;
                 break;
 
+            case OP_TRY:
+                isInt[a] = 0;
+                break;
+
             case OP_CALL: case OP_GET_TABLE: case OP_GET_METATABLE:
             case OP_LENGTH: case OP_CLOCK:
                 isInt[a] = 0;
@@ -213,7 +217,7 @@ void specializeTypes(Chunk* chunk) {
             case OP_SET_TABLE: case OP_SET_METATABLE:
             case OP_PRINT: case OP_POP: case OP_CLOSURE:
             case OP_RETURN: case OP_NOP: case OP_CONTINUE:
-            case OP_BREAK:
+            case OP_BREAK: case OP_ENDTRY:
                 break;
 
             default:

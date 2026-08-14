@@ -108,7 +108,7 @@ child["say"]();
 print("=== Metatable __call ===");
 loc callable = {};
 setmetatable(callable, {
-    "__call": func() {
+    "__call": func(self) {
         print("called!");
         return 42;
     }

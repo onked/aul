@@ -45,37 +45,10 @@ static char* readSourceFile(const char* chars, int length) {
     return buffer;
 }
 
-static void reportAndDie(Value msgVal, const char* fallback) {
-    char buf[64];
-    const char* text = NULL;
-    int len = 0;
-    if (IS_STRING(msgVal)) {
-        text = AS_STRING(msgVal)->chars;
-        len = AS_STRING(msgVal)->length;
-    } else if (IS_INTEGER(msgVal)) {
-        len = snprintf(buf, sizeof(buf), "%lld", (long long)AS_INTEGER(msgVal));
-        text = buf;
-    } else if (IS_NUMBER(msgVal)) {
-        len = snprintf(buf, sizeof(buf), "%g", AS_NUMBER_NC(msgVal));
-        text = buf;
-    } else {
-        text = fallback;
-        len = (int)strlen(fallback);
-    }
-    fwrite(text, 1, (size_t)len, stderr);
-    fputc('\n', stderr);
-
-    CallFrame* frame = &vm.frames[vm.frameCount - 1];
-    size_t instruction = frame->ip - frame->closure->function->chunk.code - 1;
-    int line = frame->closure->function->chunk.lines[instruction];
-    fprintf(stderr, "[line %d] in script\n", line);
-    exit(70);
-}
-
 static void sysError(int argCount, Value* args, Value* result) {
-    (void)result;
+    *result = NIL_VAL;
     Value msg = (argCount >= 1) ? args[0] : NIL_VAL;
-    reportAndDie(msg, "error");
+    vmRaiseError(msg);
 }
 
 static void sysAssert(int argCount, Value* args, Value* result) {
@@ -83,7 +56,9 @@ static void sysAssert(int argCount, Value* args, Value* result) {
     Value v = args[0];
     if (IS_NIL(v) || (IS_BOOL(v) && !AS_BOOL(v))) {
         Value msg = (argCount >= 2) ? args[1] : NIL_VAL;
-        reportAndDie(msg, "assertion failed!");
+        *result = NIL_VAL;
+        vmRaiseError(msg);
+        return;
     }
     *result = v;
 }
@@ -123,12 +98,22 @@ static void sysRequire(int argCount, Value* args, Value* result) {
     nextFrame->ip = closure->function->chunk.code;
     vm.frameCount = outerCount + 1;
 
+    int savedRunBase = vm.runBase;
+    vm.runBase = outerCount;
     InterpretResult r = run(outerCount);
+    vm.runBase = savedRunBase;
     vm.frameCount = outerCount;
 
     free(source);
 
     if (r == INTERPRET_RUNTIME_ERROR) {
+        if (vm.pendingError != NIL_VAL) {
+            vmReRaiseError();
+            if (vm.pendingError == NIL_VAL) {
+                *result = NIL_VAL;
+                return;
+            }
+        }
         exit(70);
     }
 

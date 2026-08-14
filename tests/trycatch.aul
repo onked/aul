@@ -1,0 +1,126 @@
+-- try/catch exception handling tests
+
+-- 1. Basic string error
+try {
+    error("boom");
+    print("SHOULD NOT PRINT");
+} catch (e) {
+    print("caught: " + e);
+}
+
+-- 2. Integer error value
+try {
+    error(42);
+} catch (e) {
+    print("caught int: " + e);
+}
+
+-- 3. Normal completion skips handler
+try {
+    print("in try");
+} catch (e) {
+    print("SHOULD NOT PRINT");
+}
+
+-- 4. Unwind through function calls
+func inner() {
+    error("deep");
+}
+
+func middle() {
+    inner();
+}
+
+try {
+    middle();
+} catch (e) {
+    print("unwound: " + e);
+}
+
+-- 5. Nested try/catch: inner catches, outer not triggered
+try {
+    try {
+        error("inner error");
+    } catch (e) {
+        print("inner catch: " + e);
+    }
+    print("outer still running");
+} catch (e) {
+    print("SHOULD NOT PRINT");
+}
+
+-- 6. Nested try/catch: inner re-raises via error(), outer catches
+try {
+    try {
+        error("re-raised");
+    } catch (e) {
+        print("inner saw: " + e);
+        error(e);
+    }
+} catch (e) {
+    print("outer catch: " + e);
+}
+
+-- 7. assert() is catchable
+try {
+    assert(1 == 2, "assertion failed");
+    print("SHOULD NOT PRINT");
+} catch (e) {
+    print("assert caught: " + e);
+}
+
+-- 8. Errors in expressions (type errors) are catchable
+try {
+    loc t = 5 - "not a number";
+    print("SHOULD NOT PRINT");
+} catch (e) {
+    print("arith caught: " + e);
+}
+
+-- 9. Undefined variable is catchable
+try {
+    loc x = nonexistentVar;
+    print("SHOULD NOT PRINT");
+} catch (e) {
+    print("undefined caught: " + e);
+}
+
+-- 10. Catch var persists like a local after the statement
+loc after = 0;
+try {
+    error("leak");
+} catch (leaked) {
+    after = leaked;
+}
+print("after: " + after);
+
+-- 11. try/catch inside a loop
+loc i = 0;
+while (i < 3) {
+    i = i + 1;
+    try {
+        if (i == 2) {
+            error("two");
+        }
+        print("loop ok " + i);
+    } catch (e) {
+        print("loop caught " + i + ": " + e);
+    }
+}
+
+-- 12. Errors from arithmetic ops in expressions propagate
+try {
+    loc s = "abc" - 5;
+    print("SHOULD NOT PRINT");
+} catch (e) {
+    print("arith2 caught: " + e);
+}
+
+-- 13. Return value from try body still flows (expression-less statement form)
+try {
+    print("done");
+} catch (e) {
+    print("SHOULD NOT PRINT");
+}
+
+print("ALL TESTS COMPLETE");

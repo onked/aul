@@ -167,10 +167,12 @@ int binary(int leftReg) {
     
     switch (operatorType) {
         case TOKEN_PLUS:
-            if (!regIsBoundToLocal(leftReg)) {
+            if (regIsBoundToLocal(leftReg)) {
+                destReg = allocateRegister();
                 emitABC(OP_ADD_BUF, destReg, leftReg, rightReg);
             } else {
-                emitABC(OP_ADD, destReg, leftReg, rightReg);
+                emitABC(OP_ADD_BUF, leftReg, leftReg, rightReg);
+                destReg = leftReg;
             }
             break;
         case TOKEN_MINUS:         emitABC(OP_SUBTRACT, destReg, leftReg, rightReg); break;

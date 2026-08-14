@@ -10,6 +10,7 @@ static void adjustJumpsCrossing(Chunk* chunk, int removePos) {
         int16_t off;
         switch (op) {
             case OP_JUMP: case OP_JUMP_IF_FALSE: case OP_FOR_IN:
+            case OP_TRY:
                 off = (int16_t)GET_Bx(inst); break;
             case OP_INT_JLT: case OP_INT_JLE:
             case OP_INT_JGT: case OP_INT_JGE:
@@ -19,12 +20,12 @@ static void adjustJumpsCrossing(Chunk* chunk, int removePos) {
         }
         int16_t target = (int16_t)(j + 1) + off;
         if (j < removePos && target > removePos) {
-            if (op == OP_JUMP || op == OP_JUMP_IF_FALSE || op == OP_FOR_IN)
+            if (op == OP_JUMP || op == OP_JUMP_IF_FALSE || op == OP_FOR_IN || op == OP_TRY)
                 chunk->code[j] = CREATE_ABx(op, GET_A(inst), (uint16_t)(off - 1));
             else
                 chunk->code[j] = CREATE_ABC(op, GET_A(inst), GET_B(inst), (uint8_t)((off - 1) & 0xFF));
         } else if (j > removePos && target <= removePos - 1) {
-            if (op == OP_JUMP || op == OP_JUMP_IF_FALSE || op == OP_FOR_IN)
+            if (op == OP_JUMP || op == OP_JUMP_IF_FALSE || op == OP_FOR_IN || op == OP_TRY)
                 chunk->code[j] = CREATE_ABx(op, GET_A(inst), (uint16_t)(off + 1));
             else
                 chunk->code[j] = CREATE_ABC(op, GET_A(inst), GET_B(inst), (uint8_t)((off + 1) & 0xFF));
@@ -52,7 +53,7 @@ static int instDestReg(uint32_t inst) {
         case OP_DEFINE_GLOBAL: case OP_SET_GLOBAL:
         case OP_SET_UPVALUE: case OP_SET_TABLE: case OP_RETURN:
         case OP_INT_JLT: case OP_INT_JLE: case OP_INT_JGT:
-        case OP_INT_JGE: case OP_INT_JE:
+        case OP_INT_JGE: case OP_INT_JE: case OP_ENDTRY:
             return -1;
         default:
             return GET_A(inst);
@@ -90,7 +91,7 @@ static bool instReadsReg(uint32_t inst, uint8_t reg) {
         case OP_JUMP: case OP_NIL: case OP_TRUE: case OP_FALSE:
         case OP_TABLE: case OP_NOP: case OP_CLOCK:
         case OP_RETURN: case OP_PRINT: case OP_POP:
-        case OP_SET_METATABLE:
+        case OP_SET_METATABLE: case OP_ENDTRY:
             return false;
         default:
             return false;
@@ -136,7 +137,7 @@ void optimizeChunk(Chunk* chunk) {
         uint32_t inst1 = chunk->code[i];
         uint32_t inst2 = chunk->code[i + 1];
 
-        if (GET_OP(inst1) == OP_ADD && GET_OP(inst2) == OP_MOVE)
+        if ((GET_OP(inst1) == OP_ADD || GET_OP(inst1) == OP_ADD_BUF) && GET_OP(inst2) == OP_MOVE)
         {
             uint8_t addDst = GET_A(inst1);
             uint8_t addLeft = GET_B(inst1);
@@ -145,7 +146,7 @@ void optimizeChunk(Chunk* chunk) {
             uint8_t moveSrc = GET_B(inst2);
 
             if (addDst == moveSrc && addLeft == moveDst) {
-                chunk->code[i] = CREATE_ABC(OP_ADD, addLeft, addLeft, addRight);
+                chunk->code[i] = CREATE_ABC(OP_ADD_BUF, addLeft, addLeft, addRight);
                 chunk->code[i + 1] = CREATE_ABC(OP_NOP, 0, 0, 0);
                 continue;
             }

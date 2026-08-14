@@ -210,6 +210,33 @@ static void fixupUpvalueMetadata() {
     }
 }
 
+// optimization passes so the recorded offsets are final.
+static void buildExceptionTable(ObjFunction* function) {
+    Chunk* chunk = &function->chunk;
+    for (int i = 0; i < chunk->count; i++) {
+        if (GET_OP(chunk->code[i]) != OP_TRY) continue;
+
+        uint32_t tryInst = chunk->code[i];
+        int start = i;
+        int handler = i + 1 + (int16_t)GET_Bx(tryInst);
+        int end = i + 1;
+        int depth = 0;
+        for (int j = i; j < chunk->count; j++) {
+            OpCode op = GET_OP(chunk->code[j]);
+            if (op == OP_TRY) {
+                depth++;
+            } else if (op == OP_ENDTRY) {
+                depth--;
+                if (depth == 0) {
+                    end = j;
+                    break;
+                }
+            }
+        }
+        writeException(chunk, start, end, handler, GET_A(tryInst));
+    }
+}
+
 ObjFunction* endCompiler() {
     emitABC(OP_RETURN, 0, 0, 0);
     fixupUpvalueMetadata();
@@ -218,6 +245,7 @@ ObjFunction* endCompiler() {
     specializeTypes(&function->chunk);
     foldCompareJumps(&function->chunk);
     removeNops(&function->chunk);
+    buildExceptionTable(function);
     
     function->maxRegs = current->maxRegister + 1;
     current = current->enclosing;
