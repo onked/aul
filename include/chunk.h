@@ -59,6 +59,8 @@ typedef enum {
     OP_POP,
     OP_CALL,
     OP_RETURN,
+    OP_RETURN_MULTI,
+    OP_GET_RET,
     OP_CLOSURE,
     OP_CLOCK,
     OP_INCREMENT,

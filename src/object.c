@@ -89,6 +89,14 @@ ObjTable* newTable() {
     return table;
 }
 
+ObjError* newError(Value message, int line, ObjString* traceback) {
+    ObjError* error = (ObjError*)allocateObject(sizeof(ObjError), OBJ_ERROR);
+    error->message = message;
+    error->line = line;
+    error->traceback = traceback;
+    return error;
+}
+
 static uint32_t hashString(const char* key, int length) {
     uint32_t hash = 2166136261u;
     for (int i = 0; i < length; i++) {

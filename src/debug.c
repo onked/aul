@@ -120,6 +120,10 @@ int disassembleInstruction(Chunk *chunk, int offset) {
             return abcInstruction("OP_SET_UPVALUE", instruction, offset);
         case OP_RETURN:
             return simpleRegister("OP_RETURN", instruction, offset);
+        case OP_RETURN_MULTI:
+            return abcInstruction("OP_RETURN_MULTI", instruction, offset);
+        case OP_GET_RET:
+            return abcInstruction("OP_GET_RET", instruction, offset);
         case OP_JUMP: {
             uint16_t jumpOffset = GET_Bx(instruction);
             printf("%-16s %4d\n", "OP_JUMP", jumpOffset);

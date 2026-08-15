@@ -29,6 +29,7 @@ int parsePrecedence(Precedence precedence) {
 }
 
 int expression() {
+    lastCallReg = -1;
     return parsePrecedence(PREC_ASSIGNMENT);
 }
 
@@ -41,6 +42,7 @@ int number(bool canAssign) {
     } else {
         emitABx(OP_CONSTANT, reg, makeConstant(NUMBER_VAL(value)));
     }
+    lastCallReg = -1;
     return reg;
 }
 
@@ -116,6 +118,7 @@ int string(bool canAssign) {
     Value value = OBJ_VAL(decodeStringLiteral(parser.previous));
     int reg = allocateRegister();
     emitABx(OP_CONSTANT, reg, makeConstant(value));
+    lastCallReg = -1;
     return reg;
 }
 
@@ -128,6 +131,7 @@ int literal(bool canAssign) {
         case TOKEN_TRUE:  emitABC(OP_TRUE,  reg, 0, 0); break;
         default: return 0;
     }
+    lastCallReg = -1;
     return reg;
 }
 
@@ -155,6 +159,7 @@ int unary(bool canAssign) {
             break;
         default: return 0;
     }
+    lastCallReg = -1;
     return destReg;
 }
 
@@ -188,6 +193,7 @@ int binary(int leftReg) {
         default: return 0;
     }
 
+    lastCallReg = -1;
     return destReg;
 }
 
@@ -468,6 +474,7 @@ int and_(int leftReg) {
     
     int rightReg = expression();
     patchJump(endJump);
+    lastCallReg = -1;
     return rightReg;
 }
 
@@ -481,6 +488,7 @@ int or_(int leftReg) {
     
     int rightReg = expression();
     patchJump(endJump);
+    lastCallReg = -1;
     return rightReg;
 }
 

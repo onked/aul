@@ -13,6 +13,7 @@ Parser parser;
 Compiler* current = NULL;
 Chunk* compilingChunk;
 int nextFreeRegister = 0;
+int lastCallReg = -1;
 
 bool regIsBoundToLocal(int reg) {
     for (int k = 0; k < current->localCount; k++) {

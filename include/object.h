@@ -11,7 +11,8 @@ typedef enum {
     OBJ_CLOSURE,
     OBJ_UPVALUE,
     OBJ_TABLE,
-    OBJ_NATIVE
+    OBJ_NATIVE,
+    OBJ_ERROR
 } ObjType;
 
 typedef void (*NativeFn)(int argCount, Value* args, Value* result);
@@ -86,6 +87,13 @@ typedef struct {
     int arity;
 } ObjNative;
 
+typedef struct {
+    Obj obj;
+    Value message;
+    int line;
+    ObjString* traceback;
+} ObjError;
+
 struct ObjString {
     Obj obj;
     int length;
@@ -101,6 +109,7 @@ struct ObjString {
 #define IS_CLOSURE(value)   isObjType(value, OBJ_CLOSURE)
 #define IS_TABLE(value)     isObjType(value, OBJ_TABLE)
 #define IS_NATIVE(value)    isObjType(value, OBJ_NATIVE)
+#define IS_ERR(value)       isObjType(value, OBJ_ERROR)
 
 #define AS_CSTRING(value)   (((ObjString*)AS_OBJ(value))->chars)
 #define AS_STRING(value)    ((ObjString*)AS_OBJ(value))
@@ -108,6 +117,7 @@ struct ObjString {
 #define AS_CLOSURE(value)   ((ObjClosure*)AS_OBJ(value))
 #define AS_TABLE(value)     ((ObjTable*)AS_OBJ(value))
 #define AS_NATIVE(value)    ((ObjNative*)AS_OBJ(value))
+#define AS_ERR(value)       ((ObjError*)AS_OBJ(value))
 
 static inline bool isObjType(Value value, ObjType type) {
     return IS_OBJ(value) && AS_OBJ(value)->type == type;
@@ -118,6 +128,7 @@ ObjNative* newNative(const char* name, NativeFn function, int arity);
 ObjClosure* newClosure(ObjFunction* function);
 ObjUpvalue* newUpvalue(Value* slot);
 ObjTable* newTable();
+ObjError* newError(Value message, int line, ObjString* traceback);
 ObjString* copyString(const char* chars, int length);
 ObjString* takeString(char* chars, int length);
 ObjString* rawString(char* chars, int length, uint32_t hash, int capacity);

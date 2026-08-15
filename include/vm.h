@@ -71,6 +71,10 @@ typedef struct {
     struct ObjString* mmMul;
     struct ObjString* mmDiv;
 
+    struct ObjString* errorMessage;
+    struct ObjString* errorLine;
+    struct ObjString* errorTraceback;
+
     Value openString;
     int openStringReg;
 
@@ -78,6 +82,9 @@ typedef struct {
     Value pendingError;
     int runBase;
     bool errorPrinted;
+
+    Value returnValues[250];
+    int returnCount;
 
     GlobalCacheEntry globalCache[GLOBAL_CACHE_SIZE];
 } VM;

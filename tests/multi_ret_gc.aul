@@ -1,0 +1,28 @@
+-- GC stress with multiple return values (heap objects + many allocations)
+
+func makeBig() {
+    loc t = {}
+    loc i = 1
+    while (i <= 50) {
+        t[i] = "string value number " + i
+        i = i + 1
+    }
+    return t, "extra", 123
+}
+
+loc a, b, c
+loc i = 0
+while (i < 3000) {
+    loc x, y, z = makeBig()
+    a = x
+    b = y
+    c = z
+    loc waste = {}
+    waste[1] = "padding"
+    i = i + 1
+}
+
+print(a[50])
+print(b)
+print(c)
+print(i)

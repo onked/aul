@@ -93,6 +93,12 @@ void blackenObject(Obj* object) {
         markObject((Obj*)native->name);
         break;
     }
+    case OBJ_ERROR: {
+        ObjError* error = (ObjError*)object;
+        markValue(error->message);
+        markObject((Obj*)error->traceback);
+        break;
+    }
 
     }
 }
@@ -136,6 +142,12 @@ void markRoots() {
     markObject((Obj*)vm.mmSub);
     markObject((Obj*)vm.mmMul);
     markObject((Obj*)vm.mmDiv);
+    markObject((Obj*)vm.errorMessage);
+    markObject((Obj*)vm.errorLine);
+    markObject((Obj*)vm.errorTraceback);
+    for (int i = 0; i < vm.returnCount; i++) {
+        markValue(vm.returnValues[i]);
+    }
     if (vm.openString != NIL_VAL) markValue(vm.openString);
     if (vm.pendingError != NIL_VAL) markValue(vm.pendingError);
 
@@ -215,6 +227,7 @@ void freeObject(Obj* object) {
     case OBJ_UPVALUE:  objSize = sizeof(ObjUpvalue);  break;
     case OBJ_TABLE:    objSize = sizeof(ObjTable);    break;
     case OBJ_NATIVE:   objSize = sizeof(ObjNative);   break;
+    case OBJ_ERROR:    objSize = sizeof(ObjError);    break;
     }
 
     switch (object->type) {
@@ -245,6 +258,8 @@ void freeObject(Obj* object) {
         break;
     }
     case OBJ_NATIVE:
+        break;
+    case OBJ_ERROR:
         break;
     }
 

@@ -27,9 +27,72 @@ static void resetStack()
     vm.openUpvalues = NULL;
 }
 
+static int currentErrorLine() {
+    if (vm.frameCount == 0) return 0;
+    CallFrame* frame = &vm.frames[vm.frameCount - 1];
+    ObjFunction* fn = frame->closure->function;
+    size_t instruction = frame->ip - fn->chunk.code - 1;
+    if (instruction < (size_t)fn->chunk.count) {
+        return fn->chunk.lines[instruction];
+    }
+    return 0;
+}
+
+static ObjString* buildTracebackString() {
+    if (vm.frameCount == 0) return NULL;
+
+    int cap = 256;
+    int len = 0;
+    char* buf = (char*)reallocate(NULL, 0, cap);
+
+#define APPEND(s, slen) do { \
+    if (len + (slen) + 1 > cap) { \
+        int oldCap = cap; \
+        cap = (len + (slen) + 1) * 2; \
+        buf = (char*)reallocate(buf, oldCap, cap); \
+    } \
+    memcpy(buf + len, (s), (slen)); \
+    len += (slen); \
+} while (0)
+
+    APPEND("stack traceback:\n", 17);
+    for (int i = vm.frameCount - 1; i >= 0; i--) {
+        CallFrame* frame = &vm.frames[i];
+        ObjFunction* fn = frame->closure->function;
+        size_t instruction = frame->ip - fn->chunk.code - 1;
+        int line = fn->chunk.lines[instruction];
+        char lineBuf[128];
+        int lineLen;
+        if (fn->name != NULL) {
+            lineLen = snprintf(lineBuf, sizeof(lineBuf), "  [line %d] in %s()\n", line, fn->name->chars);
+        } else if (i == 0) {
+            lineLen = snprintf(lineBuf, sizeof(lineBuf), "  [line %d] in script\n", line);
+        } else {
+            lineLen = snprintf(lineBuf, sizeof(lineBuf), "  [line %d] in <anonymous>\n", line);
+        }
+        APPEND(lineBuf, lineLen);
+    }
+
+#undef APPEND
+
+    buf = (char*)reallocate(buf, cap, len + 1);
+    return rawString(buf, len, 0, len);
+}
+
 static int raiseError(Value message)
 {
     if (IS_NIL(vm.pendingError)) vm.errorPrinted = false;
+
+    if (!IS_ERR(message)) {
+        if (IS_OBJ(message) &&
+            (vm.gcPhase == GC_PHASE_MARK || vm.gcPhase == GC_PHASE_ATOMIC)) {
+            markObject(AS_OBJ(message));
+        }
+        int line = currentErrorLine();
+        ObjString* tb = buildTracebackString();
+        message = OBJ_VAL(newError(message, line, tb));
+    }
+
     vm.pendingError = message;
     vm.openString = NIL_VAL;
     vm.openStringReg = -1;
@@ -58,10 +121,7 @@ static int raiseError(Value message)
     return 0;
 }
 
-static void uncaughtError(Value message) {
-    if (vm.errorPrinted) return;
-    vm.errorPrinted = true;
-
+static void printErrorMessage(Value message) {
     char buf[64];
     const char* text = NULL;
     int len = 0;
@@ -83,6 +143,24 @@ static void uncaughtError(Value message) {
     }
     fwrite(text, 1, (size_t)len, stderr);
     fputc('\n', stderr);
+}
+
+static void uncaughtError(Value message) {
+    if (vm.errorPrinted) return;
+    vm.errorPrinted = true;
+
+    if (IS_ERR(message)) {
+        ObjError* error = AS_ERR(message);
+        printErrorMessage(error->message);
+        if (error->traceback != NULL) {
+            fwrite(error->traceback->chars, 1, (size_t)error->traceback->length, stderr);
+            fputc('\n', stderr);
+        }
+        resetStack();
+        return;
+    }
+
+    printErrorMessage(message);
 
     if (vm.frameCount > 0) {
         fprintf(stderr, "stack traceback:\n");
@@ -155,11 +233,19 @@ void initVM()
     vm.mmSub      = copyString("__sub", 5);
     vm.mmMul      = copyString("__mul", 5);
     vm.mmDiv      = copyString("__div", 5);
+
+    vm.errorMessage = copyString("message", 7);
+    vm.errorLine = copyString("line", 4);
+    vm.errorTraceback = copyString("traceback", 9);
     vm.openString = NIL_VAL;
     vm.openStringReg = -1;
     vm.pendingError = NIL_VAL;
     vm.runBase = 0;
     vm.errorPrinted = false;
+    vm.returnCount = 0;
+    for (int i = 0; i < 250; i++) {
+        vm.returnValues[i] = NIL_VAL;
+    }
     for (int i = 0; i < GLOBAL_CACHE_SIZE; i++) {
         vm.globalCache[i].name = NULL;
     }
@@ -539,6 +625,8 @@ InterpretResult run(int baseFrame)
         [OP_POP] = &&OP_POP,
         [OP_CALL] = &&OP_CALL,
         [OP_RETURN] = &&OP_RETURN,
+        [OP_RETURN_MULTI] = &&OP_RETURN_MULTI,
+        [OP_GET_RET] = &&OP_GET_RET,
         [OP_CLOSURE] = &&OP_CLOSURE,
         [OP_GET_READONLY_UPVALUE] = &&OP_GET_READONLY_UPVALUE,
         [OP_CLOCK] = &&OP_CLOCK,
@@ -1342,7 +1430,7 @@ InterpretResult run(int baseFrame)
             Chunk* chunk = &FRAME.closure->function->chunk;
             int instIdx = (int)(FRAME.ip - 1 - chunk->code);
             InlineCache* ic = &chunk->caches[instIdx];
-            if (ic->valid && ic->table == tableVal && ic->key == keyVal)
+            if (ic->valid && IS_TABLE(tableVal) && ic->table == tableVal && ic->key == keyVal)
             {
                 if (ic->tableGen == AS_TABLE(tableVal)->writeGen) {
                     REG_SET(dest, ic->result);
@@ -1352,6 +1440,26 @@ InterpretResult run(int baseFrame)
                     break;
 #endif
                 }
+            }
+
+            if (IS_ERR(tableVal)) {
+                ObjError* error = AS_ERR(tableVal);
+                Value result = NIL_VAL;
+                if (IS_STRING(keyVal)) {
+                    if (keyVal == OBJ_VAL((Obj*)vm.errorMessage)) {
+                        result = error->message;
+                    } else if (keyVal == OBJ_VAL((Obj*)vm.errorLine)) {
+                        result = INTEGER_VAL(error->line);
+                    } else if (keyVal == OBJ_VAL((Obj*)vm.errorTraceback)) {
+                        result = error->traceback != NULL ? OBJ_VAL((Obj*)error->traceback) : NIL_VAL;
+                    }
+                }
+                REG_SET(dest, result);
+#ifdef __GNUC__
+                DISPATCH_POLL();
+#else
+                break;
+#endif
             }
 
             if (!IS_TABLE(tableVal)) {
@@ -1850,6 +1958,10 @@ InterpretResult run(int baseFrame)
             FRAME.slots[0] = result;
             GC_WRITE_BARRIER(result);
 
+            vm.returnCount = 1;
+            vm.returnValues[0] = result;
+            GC_WRITE_BARRIER(result);
+
             vm.openString = NIL_VAL;
             vm.openStringReg = -1;
 
@@ -1859,6 +1971,63 @@ InterpretResult run(int baseFrame)
                 return INTERPRET_OK;
             }
             RELOAD_FRAME();
+#ifdef __GNUC__
+            DISPATCH_POLL();
+#else
+            break;
+#endif
+        }
+
+#ifdef __GNUC__
+        OP_RETURN_MULTI:
+#else
+        case OP_RETURN_MULTI:
+#endif
+        {
+            int base = GET_A(instruction);
+            int count = GET_B(instruction);
+
+            closeUpvalues(FRAME.slots);
+
+            for (int i = 0; i < count; i++) {
+                Value result = REG(base + i);
+                FRAME.slots[i] = result;
+                GC_WRITE_BARRIER(result);
+                vm.returnValues[i] = result;
+                GC_WRITE_BARRIER(result);
+            }
+
+            vm.returnCount = count;
+
+            vm.openString = NIL_VAL;
+            vm.openStringReg = -1;
+
+            vm.frameCount--;
+            if (vm.frameCount == baseFrame)
+            {
+                return INTERPRET_OK;
+            }
+            RELOAD_FRAME();
+#ifdef __GNUC__
+            DISPATCH_POLL();
+#else
+            break;
+#endif
+        }
+
+#ifdef __GNUC__
+        OP_GET_RET:
+#else
+        case OP_GET_RET:
+#endif
+        {
+            uint8_t dest = GET_A(instruction);
+            uint8_t index = GET_B(instruction);
+            if (index < vm.returnCount) {
+                REG_SET(dest, vm.returnValues[index]);
+            } else {
+                REG_SET(dest, NIL_VAL);
+            }
 #ifdef __GNUC__
             DISPATCH_POLL();
 #else
@@ -2315,6 +2484,9 @@ InterpretResult run(int baseFrame)
                  if (vm.pendingError != NIL_VAL) return INTERPRET_RUNTIME_ERROR;
                  RELOAD_FRAME();
                  REG_SET(reg, result);
+                 vm.returnCount = 1;
+                 vm.returnValues[0] = result;
+                 GC_WRITE_BARRIER(result);
 #ifdef __GNUC__
                  DISPATCH_POLL();
 #else

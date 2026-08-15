@@ -1,0 +1,52 @@
+-- Multiple return value tests
+
+func pair() {
+    return 10, 20
+}
+
+loc a, b = pair()
+print(a)
+print(b)
+
+loc x = pair()
+print(x)
+
+loc c, d, e = pair()
+print(c)
+print(d)
+print(e)
+
+loc p, q = 42
+print(p)
+print(q)
+
+loc m, n = clock()
+print(m)
+print(n)
+
+func sum() {
+    return 1 + 2, 3 * 4
+}
+loc s1, s2 = sum()
+print(s1)
+print(s2)
+
+func triple() {
+    loc a = 1
+    loc b = 2
+    loc c = 3
+    return a, b, c
+}
+loc t1, t2, t3 = triple()
+print(t1)
+print(t2)
+print(t3)
+
+func mixed() {
+    return 7, 8, 9
+}
+loc r1, r2 = mixed()
+loc r3 = mixed()
+print(r1)
+print(r2)
+print(r3)

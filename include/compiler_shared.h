@@ -77,6 +77,7 @@ extern Parser parser;
 extern Compiler* current;
 extern Chunk* compilingChunk;
 extern int nextFreeRegister;
+extern int lastCallReg;
 
 // parser.c
 void errorAt(Token* token, const char* message);

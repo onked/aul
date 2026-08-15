@@ -52,6 +52,7 @@ static int instDestReg(uint32_t inst) {
         case OP_JUMP: case OP_JUMP_IF_FALSE: case OP_PRINT:
         case OP_DEFINE_GLOBAL: case OP_SET_GLOBAL:
         case OP_SET_UPVALUE: case OP_SET_TABLE: case OP_RETURN:
+        case OP_RETURN_MULTI:
         case OP_INT_JLT: case OP_INT_JLE: case OP_INT_JGT:
         case OP_INT_JGE: case OP_INT_JE: case OP_ENDTRY:
             return -1;

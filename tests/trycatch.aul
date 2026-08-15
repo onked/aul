@@ -5,14 +5,14 @@ try {
     error("boom");
     print("SHOULD NOT PRINT");
 } catch (e) {
-    print("caught: " + e);
+    print("caught: " + e.message);
 }
 
 -- 2. Integer error value
 try {
     error(42);
 } catch (e) {
-    print("caught int: " + e);
+    print("caught int: " + e.message);
 }
 
 -- 3. Normal completion skips handler
@@ -34,7 +34,7 @@ func middle() {
 try {
     middle();
 } catch (e) {
-    print("unwound: " + e);
+    print("unwound: " + e.message);
 }
 
 -- 5. Nested try/catch: inner catches, outer not triggered
@@ -42,7 +42,7 @@ try {
     try {
         error("inner error");
     } catch (e) {
-        print("inner catch: " + e);
+        print("inner catch: " + e.message);
     }
     print("outer still running");
 } catch (e) {
@@ -54,11 +54,11 @@ try {
     try {
         error("re-raised");
     } catch (e) {
-        print("inner saw: " + e);
+        print("inner saw: " + e.message);
         error(e);
     }
 } catch (e) {
-    print("outer catch: " + e);
+    print("outer catch: " + e.message);
 }
 
 -- 7. assert() is catchable
@@ -66,7 +66,7 @@ try {
     assert(1 == 2, "assertion failed");
     print("SHOULD NOT PRINT");
 } catch (e) {
-    print("assert caught: " + e);
+    print("assert caught: " + e.message);
 }
 
 -- 8. Errors in expressions (type errors) are catchable
@@ -74,7 +74,7 @@ try {
     loc t = 5 - "not a number";
     print("SHOULD NOT PRINT");
 } catch (e) {
-    print("arith caught: " + e);
+    print("arith caught: " + e.message);
 }
 
 -- 9. Undefined variable is catchable
@@ -82,7 +82,7 @@ try {
     loc x = nonexistentVar;
     print("SHOULD NOT PRINT");
 } catch (e) {
-    print("undefined caught: " + e);
+    print("undefined caught: " + e.message);
 }
 
 -- 10. Catch var persists like a local after the statement
@@ -92,7 +92,7 @@ try {
 } catch (leaked) {
     after = leaked;
 }
-print("after: " + after);
+print("after: " + after.message);
 
 -- 11. try/catch inside a loop
 loc i = 0;
@@ -104,7 +104,7 @@ while (i < 3) {
         }
         print("loop ok " + i);
     } catch (e) {
-        print("loop caught " + i + ": " + e);
+        print("loop caught " + i + ": " + e.message);
     }
 }
 
@@ -113,7 +113,7 @@ try {
     loc s = "abc" - 5;
     print("SHOULD NOT PRINT");
 } catch (e) {
-    print("arith2 caught: " + e);
+    print("arith2 caught: " + e.message);
 }
 
 -- 13. Return value from try body still flows (expression-less statement form)

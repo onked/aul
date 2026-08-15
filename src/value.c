@@ -62,6 +62,13 @@ void printValue(Value value) {
             }
         } else if (IS_TABLE(value)) {
             printf("<table>");
+        } else if (IS_ERR(value)) {
+            ObjError* error = AS_ERR(value);
+            if (IS_ERR(error->message)) {
+                printf("<error>");
+            } else {
+                printValue(error->message);
+            }
         }
     }
 }

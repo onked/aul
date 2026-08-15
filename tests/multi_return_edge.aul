@@ -1,0 +1,57 @@
+-- Edge cases for multi return detection
+
+func two() {
+    return 1, 2
+}
+
+func wrap() {
+    return two()
+}
+loc w1, w2 = wrap()
+print(w1)
+print(w2)
+
+loc p1, p2 = two() + 100
+print(p1)
+print(p2)
+
+loc q1, q2 = true and two()
+print(q1)
+print(q2)
+
+loc r1, r2 = false or two()
+print(r1)
+print(r2)
+
+loc g1, g2 = (two())
+print(g1)
+print(g2)
+
+glo ga
+glo gb
+loc h1, h2 = two()
+ga = h1
+gb = h2
+print(ga)
+print(gb)
+
+func noargs() {
+    return 5
+}
+loc c1, c2 = noargs()
+print(c1)
+print(c2)
+
+func condMulti(flag) {
+    if (flag) {
+        return 10, 11
+    } else {
+        return 20, 21
+    }
+}
+loc m1, m2 = condMulti(true)
+print(m1)
+print(m2)
+loc m3, m4 = condMulti(false)
+print(m3)
+print(m4)

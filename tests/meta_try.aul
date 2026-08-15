@@ -9,7 +9,7 @@ try {
     loc r = t1 + 5;
     print("SHOULD NOT PRINT");
 } catch (e) {
-    print("meta caught: " + e);
+    print("meta caught: " + e.message);
 }
 
 loc t2 = {};
@@ -34,7 +34,7 @@ try {
     loc n = t3 - 5;
     print("SHOULD NOT PRINT");
 } catch (e) {
-    print("sub caught: " + e);
+    print("sub caught: " + e.message);
 }
 
 loc t4 = {};
@@ -48,7 +48,7 @@ try {
     t4(1);
     print("SHOULD NOT PRINT");
 } catch (e) {
-    print("call caught: " + e);
+    print("call caught: " + e.message);
 }
 
 loc t5 = {};
@@ -58,10 +58,9 @@ try {
     t5(1);
     print("SHOULD NOT PRINT");
 } catch (e) {
-    print("call2 caught: " + e);
+    print("call2 caught: " + e.message);
 }
 
--- __call receives the table as self (was: arity mismatch)
 loc t6 = {};
 loc mt6 = {};
 mt6["__call"] = func(self, a, b) {
@@ -71,7 +70,6 @@ setmetatable(t6, mt6);
 t6["base"] = 100;
 print("call self: " + t6(3, 4));
 
--- __len metamethod is invoked (was: looked up but never called)
 loc t7 = {};
 loc mt7 = {};
 mt7["__len"] = func(self) {
@@ -83,7 +81,7 @@ try {
     loc n = #t7;
     print("SHOULD NOT PRINT");
 } catch (e) {
-    print("len caught: " + e);
+    print("len caught: " + e.message);
 }
 
 loc t8 = {};

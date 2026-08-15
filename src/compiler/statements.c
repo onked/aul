@@ -28,21 +28,32 @@ static void globalDeclaration() {
     match(TOKEN_SEMICOLON);
 }
 
-static void localDeclaration() {
-    Token name = parser.previous;
-    int reg;
+static void localDeclaration(Token* names, int nameCount) {
     if (match(TOKEN_EQUAL)) {
-        reg = expression();
+        int reg = expression();
         if (regIsBoundToLocal(reg)) {
             int fresh = allocateRegister();
             emitABC(OP_MOVE, fresh, reg, 0);
             reg = fresh;
         }
+        addLocal(names[0], reg);
+        bool isCall = (reg == lastCallReg);
+        for (int i = 1; i < nameCount; i++) {
+            int destReg = allocateRegister();
+            if (isCall) {
+                emitABC(OP_GET_RET, destReg, i, 0);
+            } else {
+                emitABC(OP_NIL, destReg, 0, 0);
+            }
+            addLocal(names[i], destReg);
+        }
     } else {
-        reg = allocateRegister();
-        emitABC(OP_NIL, reg, 0, 0);
+        for (int i = 0; i < nameCount; i++) {
+            int nilReg = allocateRegister();
+            emitABC(OP_NIL, nilReg, 0, 0);
+            addLocal(names[i], nilReg);
+        }
     }
-    addLocal(name, reg);
     match(TOKEN_SEMICOLON);
 }
 
@@ -54,15 +65,43 @@ static void printStatement() {
 }
 
 static void returnStatement() {
-    int reg;
-    if (match(TOKEN_SEMICOLON)) {
-        reg = allocateRegister();
-        emitABC(OP_NIL, reg, 0, 0);
-    } else {
-        reg = expression();
-        match(TOKEN_SEMICOLON);
+    int base = -1;
+    int count = 0;
+    if (!match(TOKEN_SEMICOLON)) {
+        base = allocateRegister();
+        count = 1;
+        nextFreeRegister = base;
+        int reg = expression();
+        if (reg != base) {
+            emitABC(OP_MOVE, base, reg, 0);
+        }
+        while (match(TOKEN_COMMA)) {
+            if (base + count >= 250) {
+                errorAt(&parser.current, "Too many return values.");
+                break;
+            }
+            nextFreeRegister = base + count;
+            int reg = expression();
+            if (reg != base + count) {
+                emitABC(OP_MOVE, base + count, reg, 0);
+            }
+            if (base + count > current->maxRegister) {
+                current->maxRegister = base + count;
+            }
+            count++;
+        }
     }
-    emitABC(OP_RETURN, reg, 0, 0);
+    match(TOKEN_SEMICOLON);
+
+    if (count == 0) {
+        int nilReg = allocateRegister();
+        emitABC(OP_NIL, nilReg, 0, 0);
+        emitABC(OP_RETURN, nilReg, 0, 0);
+    } else if (count == 1) {
+        emitABC(OP_RETURN, base, 0, 0);
+    } else {
+        emitABC(OP_RETURN_MULTI, base, count, 0);
+    }
 }
 
 static void function() {
@@ -174,6 +213,8 @@ int call(int leftReg) {
     consume(TOKEN_RIGHT_PAREN, "Expect ')' after function arguments.");
 
     emitABC(OP_CALL, callReg, argCount, 0);
+
+    lastCallReg = callReg;
 
     int callMinFree = current->maxRegister + 1;
     if (leftReg + 1 > callMinFree) callMinFree = leftReg + 1;
@@ -301,7 +342,8 @@ static void forStatement() {
          // no initializer
     } else if (match(TOKEN_LOC)) {
         consume(TOKEN_IDENTIFIER, "Expect variable name.");
-        localDeclaration();
+        Token name = parser.previous;
+        localDeclaration(&name, 1);
     } else {
         expression();
         match(TOKEN_SEMICOLON);
@@ -514,8 +556,19 @@ static void reuseRegisters() {
 
 void declaration() {
     if (match(TOKEN_LOC)) {
+        Token names[250];
+        int nameCount = 0;
         consume(TOKEN_IDENTIFIER, "Expect variable name.");
-        localDeclaration();
+        names[nameCount++] = parser.previous;
+        while (match(TOKEN_COMMA)) {
+            if (nameCount >= 250) {
+                errorAt(&parser.current, "Too many local variables in declaration.");
+                break;
+            }
+            consume(TOKEN_IDENTIFIER, "Expect variable name.");
+            names[nameCount++] = parser.previous;
+        }
+        localDeclaration(names, nameCount);
     } else if (match(TOKEN_GLOBAL)) {
         consume(TOKEN_IDENTIFIER, "Expect variable name.");
         globalDeclaration();
