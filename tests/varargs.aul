@@ -1,0 +1,99 @@
+-- varargs tests
+
+-- capture into locals
+func first(...) {
+    loc a, b, c = ...
+    return a, b, c
+}
+
+loc x, y, z = first(5, 6, 7)
+print(x)
+print(y)
+print(z)                        -- expect 5 6 7
+
+-- forward all varargs via return ...
+func passthrough(...) {
+    return ...
+}
+
+loc a, b, c = passthrough(9, 8, 7)
+print(a)
+print(b)
+print(c)                        -- expect 9 8 7
+
+-- forward into another call
+func sum(a, b, c) {
+    return a + b + c
+}
+
+func sumall(...) {
+    return sum(...)
+}
+
+print(sumall(1, 2, 3))          -- expect 6
+print(sumall(10, 20, 30))       -- expect 60
+
+-- mixed fixed + vararg
+func mixed(first, ...) {
+    print(first)                -- expect 42
+    return ...
+}
+
+loc m, n, o = mixed(42, 1, 2, 3)
+print(m)
+print(n)
+print(o)                        -- expect 42 1 2
+
+-- zero varargs = nil
+func zero(...) {
+    loc a, b = ...
+    return a, b
+}
+
+loc p, q = zero()
+print(p)
+print(q)                        -- expect nil nil
+
+-- no varargs still works
+func fixed(a, b) {
+    return a + b
+}
+print(fixed(2, 3))              -- expect 5
+
+-- forward into builtin
+func join3(a, b, c) {
+    return tostring(a) + tostring(b) + tostring(c)
+}
+
+func wrapJoin(...) {
+    return join3(...)
+}
+print(wrapJoin("x", "y", "z"))  -- expect xyz
+
+-- mixed fixed arg + vararg forward in same call (register collision check)
+func g(x, ...) {
+    return sum(x, ...)
+}
+print(g(1, 2, 3))               -- expect 6
+print(g(10, 20, 30))            -- expect 60
+
+-- deep forwarding of varargs across multiple layers
+func f1(...) { return sum(...) }
+func f2(...) { return f1(...) }
+func f3(...) { return f2(...) }
+print(f3(1, 2, 3))              -- expect 6
+
+func build(...) {
+    loc junk = ""
+    for (loc i = 1; i <= 50; i = i + 1) { junk = junk + string.format("pad%i", i) }
+    loc a, b, c, d, e = ...
+    return a + b + c + d + e
+}
+print(build("a", "b", "c", "d", "e"))  -- expect abcde
+print(build("x", "y", "z", "w", "v"))  -- expect xyzwv
+
+func forwardGC(...) {
+    loc junk = string.format("junk%i%i%i", 1, 2, 3)
+    return build(...)
+}
+print(forwardGC(1, 2, 3, 4, 5))        -- expect 15

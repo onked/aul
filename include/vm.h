@@ -24,6 +24,9 @@ typedef struct {
     ObjClosure* closure;
     uint32_t* ip;
     Value* slots;
+    int argCount;
+    int varargCount;
+    Value varargs[250];
 } CallFrame;
 
 typedef enum {

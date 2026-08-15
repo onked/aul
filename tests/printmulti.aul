@@ -1,0 +1,12 @@
+-- multi argument print tests
+
+loc x = 5
+loc y = 10
+print(x + " is X", y + " is Y")     -- expect: 5 is X 10 is Y
+print("a", "b", "c")                -- expect: a b c
+print(1, 2, 3)                      -- expect: 1 2 3
+print("single")                     -- expect: single
+loc s = "hi"
+print("start", s, "end", x)         -- expect: start hi end 5
+print()                             -- expect: blank line
+print("mixed", 1.5, true, nil)      -- expect: mixed 1.5 true nil

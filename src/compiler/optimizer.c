@@ -52,7 +52,7 @@ static int instDestReg(uint32_t inst) {
         case OP_JUMP: case OP_JUMP_IF_FALSE: case OP_PRINT:
         case OP_DEFINE_GLOBAL: case OP_SET_GLOBAL:
         case OP_SET_UPVALUE: case OP_SET_TABLE: case OP_RETURN:
-        case OP_RETURN_MULTI:
+        case OP_RETURN_MULTI: case OP_RETURN_VARARG:
         case OP_INT_JLT: case OP_INT_JLE: case OP_INT_JGT:
         case OP_INT_JGE: case OP_INT_JE: case OP_ENDTRY:
             return -1;
@@ -93,6 +93,7 @@ static bool instReadsReg(uint32_t inst, uint8_t reg) {
         case OP_TABLE: case OP_NOP: case OP_CLOCK:
         case OP_RETURN: case OP_PRINT: case OP_POP:
         case OP_SET_METATABLE: case OP_ENDTRY:
+        case OP_VARARG: case OP_RETURN_VARARG:
             return false;
         default:
             return false;

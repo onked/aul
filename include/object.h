@@ -40,6 +40,7 @@ typedef struct {
     int arity;
     int upvalueCount;
     int maxRegs;
+    bool isVararg;
     Chunk chunk;
     struct ObjString* name;
     Upvalue upvalues[250];

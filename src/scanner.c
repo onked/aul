@@ -215,7 +215,12 @@ Token scanToken() {
         case '#': return makeToken(TOKEN_HASH);
         case ';': return makeToken(TOKEN_SEMICOLON);
         case ',': return makeToken(TOKEN_COMMA);
-        case '.': return makeToken(TOKEN_DOT);
+        case '.':
+            if (match('.')) {
+                if (match('.')) return makeToken(TOKEN_ELLIPSIS);
+                return makeToken(TOKEN_DOT);
+            }
+            return makeToken(TOKEN_DOT);
         case '!':
             return makeToken(match('=') ? TOKEN_BANG_EQUAL : TOKEN_BANG);
         case '=':

@@ -449,6 +449,8 @@ static bool callBinaryMetamethod(Value handler, Value a, Value b,
     mf->closure = closure;
     mf->ip = closure->function->chunk.code;
     mf->slots = scratch;
+    mf->argCount = 2;
+    mf->varargCount = 0;
 
     int savedRunBase = vm.runBase;
     vm.runBase = base;
@@ -492,6 +494,8 @@ static bool callUnaryMetamethod(Value handler, Value self, Value* scratch,
     mf->closure = closure;
     mf->ip = closure->function->chunk.code;
     mf->slots = scratch;
+    mf->argCount = 1;
+    mf->varargCount = 0;
 
     int savedRunBase = vm.runBase;
     vm.runBase = base;
@@ -626,7 +630,9 @@ InterpretResult run(int baseFrame)
         [OP_CALL] = &&OP_CALL,
         [OP_RETURN] = &&OP_RETURN,
         [OP_RETURN_MULTI] = &&OP_RETURN_MULTI,
+        [OP_RETURN_VARARG] = &&OP_RETURN_VARARG,
         [OP_GET_RET] = &&OP_GET_RET,
+        [OP_VARARG] = &&OP_VARARG,
         [OP_CLOSURE] = &&OP_CLOSURE,
         [OP_GET_READONLY_UPVALUE] = &&OP_GET_READONLY_UPVALUE,
         [OP_CLOCK] = &&OP_CLOCK,
@@ -1778,8 +1784,16 @@ InterpretResult run(int baseFrame)
         case OP_PRINT:
 #endif
         {
-            printValue(REG(GET_A(instruction)));
-            printf("\n");
+            if (GET_B(instruction) == 2) {
+                printf("\n");
+            } else {
+                printValue(REG(GET_A(instruction)));
+                if (GET_B(instruction) == 1) {
+                    printf(" ");
+                } else {
+                    printf("\n");
+                }
+            }
             fflush(stdout);
 #ifdef __GNUC__
             DISPATCH_POLL();
@@ -2028,6 +2042,69 @@ InterpretResult run(int baseFrame)
             } else {
                 REG_SET(dest, NIL_VAL);
             }
+#ifdef __GNUC__
+            DISPATCH_POLL();
+#else
+            break;
+#endif
+        }
+
+#ifdef __GNUC__
+        OP_VARARG:
+#else
+        case OP_VARARG:
+#endif
+        {
+            uint8_t dest = GET_A(instruction);
+            int count = FRAME.varargCount;
+            if (count > 250) count = 250;
+            vm.returnCount = count;
+            for (int i = 0; i < count; i++) {
+                Value v = FRAME.varargs[i];
+                vm.returnValues[i] = v;
+                GC_WRITE_BARRIER(v);
+            }
+            if (count > 0) {
+                REG_SET(dest, vm.returnValues[0]);
+            } else {
+                REG_SET(dest, NIL_VAL);
+            }
+#ifdef __GNUC__
+            DISPATCH_POLL();
+#else
+            break;
+#endif
+        }
+
+#ifdef __GNUC__
+        OP_RETURN_VARARG:
+#else
+        case OP_RETURN_VARARG:
+#endif
+        {
+            int count = FRAME.varargCount;
+            if (count > 250) count = 250;
+
+            closeUpvalues(FRAME.slots);
+
+            for (int i = 0; i < count; i++) {
+                Value result = FRAME.varargs[i];
+                FRAME.slots[i] = result;
+                GC_WRITE_BARRIER(result);
+                vm.returnValues[i] = result;
+                GC_WRITE_BARRIER(result);
+            }
+            vm.returnCount = count;
+
+            vm.openString = NIL_VAL;
+            vm.openStringReg = -1;
+
+            vm.frameCount--;
+            if (vm.frameCount == baseFrame)
+            {
+                return INTERPRET_OK;
+            }
+            RELOAD_FRAME();
 #ifdef __GNUC__
             DISPATCH_POLL();
 #else
@@ -2461,6 +2538,13 @@ InterpretResult run(int baseFrame)
              vm.openString = NIL_VAL;
              vm.openStringReg = -1;
 
+             if (GET_C(instruction) == 1) {
+                 for (int i = 0; i < vm.returnCount; i++) {
+                     REG_SET(reg + 1 + argCount + i, vm.returnValues[i]);
+                 }
+                 argCount += vm.returnCount;
+             }
+
              if (IS_CLOSURE(callee)) {
                  closure = AS_CLOSURE(callee);
              } else if (IS_FUNCTION(callee)) {
@@ -2554,7 +2638,19 @@ InterpretResult run(int baseFrame)
 #endif
              }
 
-             if (argCount != closure->function->arity) {
+             if (closure->function->isVararg) {
+                 if (argCount < closure->function->arity) {
+                     runtimeError("Expected at least %d arguments but got %d.",
+                                  closure->function->arity, argCount);
+                     if (vm.pendingError != NIL_VAL) return INTERPRET_RUNTIME_ERROR;
+                     RELOAD_FRAME();
+#ifdef __GNUC__
+                     DISPATCH_POLL();
+#else
+                     break;
+#endif
+                 }
+             } else if (argCount != closure->function->arity) {
                  runtimeError("Expected %d arguments but got %d.",
                               closure->function->arity, argCount);
                  if (vm.pendingError != NIL_VAL) return INTERPRET_RUNTIME_ERROR;
@@ -2582,6 +2678,18 @@ InterpretResult run(int baseFrame)
              nextFrame->ip = closure->function->chunk.code;
 
              nextFrame->slots = &REG(reg);
+             nextFrame->argCount = argCount;
+             nextFrame->varargCount = 0;
+             if (closure->function->isVararg) {
+                 int extras = argCount - closure->function->arity;
+                 if (extras < 0) extras = 0;
+                 if (extras > 250) extras = 250;
+                 nextFrame->varargCount = extras;
+                 for (int i = 0; i < extras; i++) {
+                     nextFrame->varargs[i] = REG(reg + 1 + closure->function->arity + i);
+                     GC_WRITE_BARRIER(nextFrame->varargs[i]);
+                 }
+             }
 
              vm.frameCount++;
              RELOAD_FRAME();
@@ -2657,6 +2765,8 @@ InterpretResult interpret(const char *source)
     vm.frames[0].closure = closure;
     vm.frames[0].slots = vm.stack;
     vm.frames[0].ip = closure->function->chunk.code;
+    vm.frames[0].argCount = 0;
+    vm.frames[0].varargCount = 0;
 
     return run(0);
 }

@@ -1,0 +1,50 @@
+-- basic method call
+glo Vector = { x: 3, y: 4 }
+Vector.len = func(self) { return math.sqrt(self.x * self.x + self.y * self.y) }
+print(Vector:len())                 -- expect 5
+
+-- method with args
+glo Counter = { count: 10 }
+Counter.inc = func(self, step) { self.count = self.count + step; return self.count }
+print(Counter:inc(1))               -- expect 11
+print(Counter:inc(5))               -- expect 16
+
+-- multiple args
+glo Calc = {}
+Calc.sum = func(self, a, b, c) { return a + b + c }
+print(Calc:sum(1, 2, 3))            -- expect 6
+
+-- chaining dot on method result
+glo Obj = { val: 5 }
+Obj.get = func(self) { return self }
+print(Obj:get().val)                -- expect 5
+
+-- complex receiver expression
+glo Box = { val: 42 }
+Box.get = func(self) { return self.val }
+glo Factory = {}
+Factory.make = func() { return Box }
+print(Factory.make():get())         -- expect 42
+
+-- nested method calls (self returning)
+glo A = { n: 10 }
+A.inc = func(self) { self.n = self.n + 1; return self }
+print(A:inc():inc():inc().n)        -- expect 13
+
+-- vararg forwarding into method
+glo M = { base: 100 }
+M.sumall = func(self, ...) {
+    loc a, b, c = ...
+    return self.base + a + b + c
+}
+print(M:sumall(1, 2, 3))            -- expect 106
+
+-- method accessed as value via dot
+glo D = { v: 7 }
+D.getv = func(self) { return self.v }
+loc f = D.getv
+print(f(D))                         -- expect 7
+
+-- colon method must not break table literal colon keys
+glo T = { alpha: 1 }
+print(T.alpha)                      -- expect 1

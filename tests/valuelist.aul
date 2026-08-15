@@ -1,0 +1,37 @@
+-- value lists loc a, b = 1, 2
+
+loc a, b = 1, 2
+print(a)
+print(b)
+
+-- fewer values than names -> nil
+loc c, d, e = 10, 20
+print(c)
+print(d)
+print(e)
+
+-- more values than names -> extra discarded
+loc f, g = 5, 6, 7
+print(f)
+print(g)
+
+-- swap
+loc x, y = 1, 2
+loc tmp
+loc x, y = y, x
+print(x)
+print(y)
+
+-- mixed with expressions
+loc p, q = 2 * 3, "hi"
+print(p)
+print(q)
+
+-- RHS uses previously declared locals
+loc u, v = a, c
+print(u)
+print(v)
+
+-- empty value with single
+loc n = 42
+print(n)

@@ -30,22 +30,45 @@ static void globalDeclaration() {
 
 static void localDeclaration(Token* names, int nameCount) {
     if (match(TOKEN_EQUAL)) {
+        int base = allocateRegister();
+        int count = 0;
+        nextFreeRegister = base;
         int reg = expression();
-        if (regIsBoundToLocal(reg)) {
-            int fresh = allocateRegister();
-            emitABC(OP_MOVE, fresh, reg, 0);
-            reg = fresh;
+        if (reg != base) {
+            emitABC(OP_MOVE, base, reg, 0);
         }
-        addLocal(names[0], reg);
+        count = 1;
         bool isCall = (reg == lastCallReg);
-        for (int i = 1; i < nameCount; i++) {
-            int destReg = allocateRegister();
-            if (isCall) {
-                emitABC(OP_GET_RET, destReg, i, 0);
-            } else {
-                emitABC(OP_NIL, destReg, 0, 0);
+
+        while (match(TOKEN_COMMA)) {
+            if (count >= 250) {
+                errorAt(&parser.current, "Too many values in declaration.");
+                break;
             }
-            addLocal(names[i], destReg);
+            nextFreeRegister = base + count;
+            int vreg = expression();
+            if (vreg != base + count) {
+                emitABC(OP_MOVE, base + count, vreg, 0);
+            }
+            if (base + count > current->maxRegister) {
+                current->maxRegister = base + count;
+            }
+            count++;
+        }
+        if (count > 1) isCall = false;
+
+        for (int i = 0; i < nameCount; i++) {
+            if (i < count) {
+                addLocal(names[i], base + i);
+            } else {
+                int destReg = allocateRegister();
+                if (isCall) {
+                    emitABC(OP_GET_RET, destReg, i, 0);
+                } else {
+                    emitABC(OP_NIL, destReg, 0, 0);
+                }
+                addLocal(names[i], destReg);
+            }
         }
     } else {
         for (int i = 0; i < nameCount; i++) {
@@ -59,19 +82,47 @@ static void localDeclaration(Token* names, int nameCount) {
 
 static void printStatement() {
     consume(TOKEN_LEFT_PAREN, "Expect '(' after 'print'.");
+    if (match(TOKEN_RIGHT_PAREN)) {
+        emitABC(OP_PRINT, 0, 2, 0);
+        return;
+    }
+    int firstReg = allocateRegister();
+    int argCount = 0;
+    nextFreeRegister = firstReg;
     int reg = expression();
+    if (reg != firstReg) {
+        emitABC(OP_MOVE, firstReg, reg, 0);
+    }
+    argCount++;
+    while (match(TOKEN_COMMA)) {
+        if (firstReg + argCount >= 250) {
+            errorAt(&parser.current, "Too many arguments to print.");
+            break;
+        }
+        nextFreeRegister = firstReg + argCount;
+        int exprReg = expression();
+        if (exprReg != firstReg + argCount) {
+            emitABC(OP_MOVE, firstReg + argCount, exprReg, 0);
+        }
+        argCount++;
+    }
     consume(TOKEN_RIGHT_PAREN, "Expect ')' after expression.");
-    emitABC(OP_PRINT, reg, 0, 0);
+    for (int i = 0; i < argCount; i++) {
+        emitABC(OP_PRINT, firstReg + i, (i == argCount - 1) ? 0 : 1, 0);
+    }
+    nextFreeRegister = firstReg;
 }
 
 static void returnStatement() {
     int base = -1;
     int count = 0;
+    int firstReg = -1;
     if (!match(TOKEN_SEMICOLON)) {
         base = allocateRegister();
         count = 1;
         nextFreeRegister = base;
         int reg = expression();
+        firstReg = reg;
         if (reg != base) {
             emitABC(OP_MOVE, base, reg, 0);
         }
@@ -97,6 +148,8 @@ static void returnStatement() {
         int nilReg = allocateRegister();
         emitABC(OP_NIL, nilReg, 0, 0);
         emitABC(OP_RETURN, nilReg, 0, 0);
+    } else if (count == 1 && firstReg == lastVarargReg) {
+        emitABC(OP_RETURN_VARARG, 0, 0, 0);
     } else if (count == 1) {
         emitABC(OP_RETURN, base, 0, 0);
     } else {
@@ -116,6 +169,10 @@ static void function() {
     consume(TOKEN_LEFT_PAREN, "Expect '(' after function name.");
     if (!check(TOKEN_RIGHT_PAREN)) {
         do {
+            if (match(TOKEN_ELLIPSIS)) {
+                current->function->isVararg = true;
+                break;
+            }
             current->function->arity++;
             if (current->function->arity > 250) errorAt(&parser.current, "Too many parameters.");
             consume(TOKEN_IDENTIFIER, "Expect parameter name.");
@@ -158,6 +215,10 @@ int functionExpr(bool canAssign) {
     consume(TOKEN_LEFT_PAREN, "Expect '(' after 'func'.");
     if (!check(TOKEN_RIGHT_PAREN)) {
         do {
+            if (match(TOKEN_ELLIPSIS)) {
+                current->function->isVararg = true;
+                break;
+            }
             current->function->arity++;
             if (current->function->arity > 250) errorAt(&parser.current, "Too many parameters.");
             consume(TOKEN_IDENTIFIER, "Expect parameter name.");
@@ -198,9 +259,20 @@ int call(int leftReg) {
 
     int argCount = 0;
     int nextArgSlot = callReg + 1; 
+    bool isVararg = false;
 
     if (!check(TOKEN_RIGHT_PAREN)) {
         do {
+            if (match(TOKEN_ELLIPSIS)) {
+                if (!current->function->isVararg) {
+                    errorAt(&parser.previous, "Cannot use '...' outside a variadic function.");
+                }
+                isVararg = true;
+                nextFreeRegister = nextArgSlot;
+                int temp = allocateRegister();
+                emitABC(OP_VARARG, temp, 0, 0);
+                break;
+            }
             nextFreeRegister = nextArgSlot;
             int exprReg = expression();
             if (exprReg != nextArgSlot) {
@@ -212,9 +284,10 @@ int call(int leftReg) {
     }
     consume(TOKEN_RIGHT_PAREN, "Expect ')' after function arguments.");
 
-    emitABC(OP_CALL, callReg, argCount, 0);
+    emitABC(OP_CALL, callReg, argCount, isVararg ? 1 : 0);
 
     lastCallReg = callReg;
+    lastVarargReg = -1;
 
     int callMinFree = current->maxRegister + 1;
     if (leftReg + 1 > callMinFree) callMinFree = leftReg + 1;

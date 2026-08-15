@@ -96,6 +96,8 @@ static void sysRequire(int argCount, Value* args, Value* result) {
     nextFrame->closure = closure;
     nextFrame->slots = caller->slots + caller->closure->function->maxRegs;
     nextFrame->ip = closure->function->chunk.code;
+    nextFrame->argCount = 0;
+    nextFrame->varargCount = 0;
     vm.frameCount = outerCount + 1;
 
     int savedRunBase = vm.runBase;

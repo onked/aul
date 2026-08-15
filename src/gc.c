@@ -116,9 +116,13 @@ void markRoots() {
         CallFrame* frame = &vm.frames[i];
         markObject((Obj*)frame->closure);
         int regCount = frame->closure->function->maxRegs;
+        if (frame->argCount + 1 > regCount) regCount = frame->argCount + 1;
         if (regCount == 0) regCount = 1;
         for (int r = 0; r < regCount; r++) {
             markValue(frame->slots[r]);
+        }
+        for (int v = 0; v < frame->varargCount; v++) {
+            markValue(frame->varargs[v]);
         }
     }
 

@@ -33,6 +33,7 @@ ObjFunction* newFunction() {
     function->arity = 0;
     function->upvalueCount = 0;
     function->maxRegs = 0;
+    function->isVararg = false;
     function->name = NULL;
     initChunk(&function->chunk);
     return function;

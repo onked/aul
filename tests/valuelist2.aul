@@ -1,0 +1,19 @@
+-- aliasing loc a = b where b is a local
+loc b = 100
+loc a = b
+b = 200
+print(a)
+print(b)
+
+-- bare call mixed in a list each list item is single valued
+func two() {
+    return 1, 2
+}
+loc m, n = two(), 99
+print(m)
+print(n)
+
+-- bare call as whole RHS still forwards
+loc p, q = two()
+print(p)
+print(q)

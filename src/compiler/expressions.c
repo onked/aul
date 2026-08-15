@@ -30,6 +30,7 @@ int parsePrecedence(Precedence precedence) {
 
 int expression() {
     lastCallReg = -1;
+    lastVarargReg = -1;
     return parsePrecedence(PREC_ASSIGNMENT);
 }
 
@@ -43,6 +44,7 @@ int number(bool canAssign) {
         emitABx(OP_CONSTANT, reg, makeConstant(NUMBER_VAL(value)));
     }
     lastCallReg = -1;
+    lastVarargReg = -1;
     return reg;
 }
 
@@ -119,6 +121,7 @@ int string(bool canAssign) {
     int reg = allocateRegister();
     emitABx(OP_CONSTANT, reg, makeConstant(value));
     lastCallReg = -1;
+    lastVarargReg = -1;
     return reg;
 }
 
@@ -132,6 +135,7 @@ int literal(bool canAssign) {
         default: return 0;
     }
     lastCallReg = -1;
+    lastVarargReg = -1;
     return reg;
 }
 
@@ -139,6 +143,19 @@ int grouping(bool canAssign) {
     (void)canAssign;
     int reg = expression();
     consume(TOKEN_RIGHT_PAREN, "Expect ')' after expression.");
+    return reg;
+}
+
+int vararg(bool canAssign) {
+    (void)canAssign;
+    if (!current->function->isVararg) {
+        errorAt(&parser.previous, "Cannot use '...' outside a variadic function.");
+        return 0;
+    }
+    int reg = allocateRegister();
+    emitABC(OP_VARARG, reg, 0, 0);
+    lastCallReg = reg;
+    lastVarargReg = reg;
     return reg;
 }
 
@@ -160,6 +177,7 @@ int unary(bool canAssign) {
         default: return 0;
     }
     lastCallReg = -1;
+    lastVarargReg = -1;
     return destReg;
 }
 
@@ -194,6 +212,7 @@ int binary(int leftReg) {
     }
 
     lastCallReg = -1;
+    lastVarargReg = -1;
     return destReg;
 }
 
@@ -475,6 +494,7 @@ int and_(int leftReg) {
     int rightReg = expression();
     patchJump(endJump);
     lastCallReg = -1;
+    lastVarargReg = -1;
     return rightReg;
 }
 
@@ -489,6 +509,7 @@ int or_(int leftReg) {
     int rightReg = expression();
     patchJump(endJump);
     lastCallReg = -1;
+    lastVarargReg = -1;
     return rightReg;
 }
 
@@ -509,6 +530,58 @@ int dotAccess(int leftReg) {
     int destReg = allocateRegister();
     emitABC(OP_GET_TABLE, destReg, leftReg, keyReg);
     return destReg;
+}
+
+int methodCall(int leftReg) {
+    consume(TOKEN_IDENTIFIER, "Expect method name after ':'.");
+    Token name = parser.previous;
+
+    int callReg = allocateRegister();
+    int keyReg = allocateRegister();
+    emitABx(OP_CONSTANT, keyReg, makeConstant(OBJ_VAL(copyString(name.start, name.length))));
+    emitABC(OP_GET_TABLE, callReg, leftReg, keyReg);
+
+    nextFreeRegister = keyReg;
+
+    emitABC(OP_MOVE, callReg + 1, leftReg, 0);
+
+    int argCount = 1;
+    int nextArgSlot = callReg + 2;
+    bool isVararg = false;
+
+    consume(TOKEN_LEFT_PAREN, "Expect '(' after method name.");
+    if (!check(TOKEN_RIGHT_PAREN)) {
+        do {
+            if (match(TOKEN_ELLIPSIS)) {
+                if (!current->function->isVararg) {
+                    errorAt(&parser.previous, "Cannot use '...' outside a variadic function.");
+                }
+                isVararg = true;
+                nextFreeRegister = nextArgSlot;
+                int temp = allocateRegister();
+                emitABC(OP_VARARG, temp, 0, 0);
+                break;
+            }
+            nextFreeRegister = nextArgSlot;
+            int exprReg = expression();
+            if (exprReg != nextArgSlot) {
+                emitABC(OP_MOVE, nextArgSlot, exprReg, 0);
+            }
+            nextArgSlot++;
+            argCount++;
+        } while (match(TOKEN_COMMA));
+    }
+    consume(TOKEN_RIGHT_PAREN, "Expect ')' after method arguments.");
+
+    emitABC(OP_CALL, callReg, argCount, isVararg ? 1 : 0);
+
+    lastCallReg = callReg;
+    lastVarargReg = -1;
+
+    int callMinFree = current->maxRegister + 1;
+    if (leftReg + 1 > callMinFree) callMinFree = leftReg + 1;
+    nextFreeRegister = callMinFree;
+    return callReg;
 }
 
 static int resolveLocal(Token* name) {

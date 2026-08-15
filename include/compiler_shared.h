@@ -78,6 +78,7 @@ extern Compiler* current;
 extern Chunk* compilingChunk;
 extern int nextFreeRegister;
 extern int lastCallReg;
+extern int lastVarargReg;
 
 // parser.c
 void errorAt(Token* token, const char* message);
@@ -106,7 +107,9 @@ int or_(int leftReg);
 int tableLiteral(bool canAssign);
 int subscript(int leftReg);
 int dotAccess(int leftReg);
+int methodCall(int leftReg);
 int functionExpr(bool canAssign);
+int vararg(bool canAssign);
 int resolveLocalInCompiler(Compiler* compiler, Token* name);
 
 // compiler.c
