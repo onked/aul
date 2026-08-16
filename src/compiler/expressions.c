@@ -52,9 +52,7 @@ static bool isHexDigit(char c) {
     return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
 }
 
-static ObjString* decodeStringLiteral(Token token) {
-    const char* src = token.start + 1;
-    int len = token.length - 2;
+static ObjString* decodeStringChars(const char* src, int len) {
     bool hasEscape = false;
     for (int i = 0; i < len; i++) {
         if (src[i] == '\\') {
@@ -115,8 +113,124 @@ static ObjString* decodeStringLiteral(Token token) {
     return takeString(buf, n);
 }
 
+static ObjString* decodeStringLiteral(Token token) {
+    return decodeStringChars(token.start + 1, token.length - 2);
+}
+
+static int findInterpEnd(const char* src, int len, int open) {
+    int depth = 1;
+    for (int i = open + 1; i < len; i++) {
+        char c = src[i];
+        if (c == '\\') { i++; continue; }
+        if (c == '"' || c == '`') {
+            char quote = c;
+            i++;
+            while (i < len && src[i] != quote) {
+                if (src[i] == '\\') i++;
+                i++;
+            }
+            continue;
+        }
+        if (c == '{') depth++;
+        else if (c == '}') {
+            depth--;
+            if (depth == 0) return i;
+        }
+    }
+    return -1;
+}
+
+static int parseEmbeddedExpression(const char* text, int len) {
+    char* buf = (char*)malloc(len + 1);
+    if (buf == NULL) return 0;
+    memcpy(buf, text, len);
+    buf[len] = '\0';
+
+    Scanner savedScanner = scanner;
+    Token savedPrev = parser.previous;
+    Token savedCurr = parser.current;
+    bool savedHadErr = parser.hadError;
+    bool savedPanic = parser.panicMode;
+
+    initScanner(buf);
+    scanner.line = savedScanner.line;
+    advance();
+    int reg = expression();
+
+    parser.hadError = savedHadErr || parser.hadError;
+    parser.panicMode = savedPanic;
+    scanner = savedScanner;
+    parser.previous = savedPrev;
+    parser.current = savedCurr;
+
+    free(buf);
+    return reg;
+}
+
+static int appendInterpPart(int resultReg, int partReg) {
+    if (resultReg == -1) return partReg;
+    if (regIsBoundToLocal(resultReg)) {
+        int destReg = allocateRegister();
+        emitABC(OP_ADD_BUF, destReg, resultReg, partReg);
+        return destReg;
+    }
+    emitABC(OP_ADD_BUF, resultReg, resultReg, partReg);
+    return resultReg;
+}
+
+static int interpolatedString(Token token) {
+    const char* src = token.start + 1;
+    int len = token.length - 2;
+
+    int resultReg = -1;
+    int partStart = 0;
+    int i = 0;
+    while (i < len) {
+        if (src[i] == '\\') { i += 2; continue; }
+        if (src[i] == '{') {
+            if (i > partStart) {
+                ObjString* lit = decodeStringChars(src + partStart, i - partStart);
+                int reg = allocateRegister();
+                emitABx(OP_CONSTANT, reg, makeConstant(OBJ_VAL(lit)));
+                resultReg = appendInterpPart(resultReg, reg);
+            }
+            int end = findInterpEnd(src, len, i);
+            if (end == -1) {
+                errorAt(&token, "Unterminated interpolation.");
+                break;
+            }
+            int exprReg = parseEmbeddedExpression(src + i + 1, end - i - 1);
+            resultReg = appendInterpPart(resultReg, exprReg);
+            partStart = end + 1;
+            i = end + 1;
+            continue;
+        }
+        i++;
+    }
+
+    if (partStart < len) {
+        ObjString* lit = decodeStringChars(src + partStart, len - partStart);
+        int reg = allocateRegister();
+        emitABx(OP_CONSTANT, reg, makeConstant(OBJ_VAL(lit)));
+        resultReg = appendInterpPart(resultReg, reg);
+    }
+
+    if (resultReg == -1) {
+        int reg = allocateRegister();
+        emitABx(OP_CONSTANT, reg, makeConstant(OBJ_VAL(copyString("", 0))));
+        resultReg = reg;
+    }
+
+    lastCallReg = -1;
+    lastVarargReg = -1;
+    return resultReg;
+}
+
 int string(bool canAssign) {
     (void)canAssign;
+    if (parser.previous.start[0] == '`') {
+        return interpolatedString(parser.previous);
+    }
     Value value = OBJ_VAL(decodeStringLiteral(parser.previous));
     int reg = allocateRegister();
     emitABx(OP_CONSTANT, reg, makeConstant(value));
@@ -168,6 +282,7 @@ int unary(bool canAssign) {
     switch (operatorType) {
         case TOKEN_MINUS: emitABC(OP_NEGATE, destReg, argReg, 0); break;
         case TOKEN_BANG:
+        case TOKEN_NOT:
             emitABC(OP_NOT, destReg, argReg, 0);
             break;
         case TOKEN_HASH:
@@ -491,11 +606,12 @@ int and_(int leftReg) {
     uint32_t inst = compilingChunk->code[endJump];
     compilingChunk->code[endJump] = CREATE_ABx(OP_JUMP_IF_FALSE, leftReg, GET_Bx(inst));
     
-    int rightReg = expression();
+    int rightReg = parsePrecedence(PREC_AND + 1);
+    emitABC(OP_MOVE, leftReg, rightReg, 0);
     patchJump(endJump);
     lastCallReg = -1;
     lastVarargReg = -1;
-    return rightReg;
+    return leftReg;
 }
 
 int or_(int leftReg) {
@@ -506,11 +622,41 @@ int or_(int leftReg) {
     int endJump = emitJump(OP_JUMP);
     patchJump(elseJump);
     
-    int rightReg = expression();
+    int rightReg = parsePrecedence(PREC_OR + 1);
+    emitABC(OP_MOVE, leftReg, rightReg, 0);
     patchJump(endJump);
     lastCallReg = -1;
     lastVarargReg = -1;
-    return rightReg;
+    return leftReg;
+}
+
+int ternary(int leftReg) {
+    int elseJump = emitJump(OP_JUMP_IF_FALSE);
+    uint32_t inst = compilingChunk->code[elseJump];
+    compilingChunk->code[elseJump] = CREATE_ABx(OP_JUMP_IF_FALSE, leftReg, GET_Bx(inst));
+
+    ParseRule* colonRule = getRule(TOKEN_COLON);
+    ParseRule savedColon = *colonRule;
+    colonRule->infix = NULL;
+    colonRule->precedence = PREC_NONE;
+
+    int thenReg = expression();
+
+    *colonRule = savedColon;
+
+    int destReg = allocateRegister();
+    emitABC(OP_MOVE, destReg, thenReg, 0);
+    int endJump = emitJump(OP_JUMP);
+    patchJump(elseJump);
+
+    consume(TOKEN_COLON, "Expect ':' between ternary branches.");
+    int elseReg = expression();
+    emitABC(OP_MOVE, destReg, elseReg, 0);
+    patchJump(endJump);
+
+    lastCallReg = -1;
+    lastVarargReg = -1;
+    return destReg;
 }
 
 int dotAccess(int leftReg) {

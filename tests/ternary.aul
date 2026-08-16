@@ -1,0 +1,79 @@
+-- ternary operator tests
+glo fails = 0
+
+func check(cond, msg) {
+    if (not cond) {
+        print("FAIL:", msg)
+        fails = fails + 1
+    }
+}
+
+-- basic
+check((true  ? "yes" : "no") == "yes", "true branch")
+check((false ? "yes" : "no") == "no",  "false branch")
+
+-- numbers
+check((10 > 5 ? 100 : 200) == 100, "numeric true")
+check((10 < 5 ? 100 : 200) == 200, "numeric false")
+
+-- integers / result of arithmetic in branches
+check((true ? 1 + 2 : 4 * 5) == 3,  "arith then-branch")
+check((false ? 1 + 2 : 4 * 5) == 20, "arith else-branch")
+
+-- comparison as condition
+loc x = 7
+check((x == 7 ? "seven" : "other") == "seven", "compare cond")
+
+-- nested ternary (right assoc via expression() else-branch)
+loc n = 5
+check((n > 0 ? (n > 10 ? "big" : "small") : "neg") == "small", "nested ternary")
+check((-3 > 0 ? "pos" : (-3 > -10 ? "neg" : "veryneg")) == "neg", "nested in else")
+
+-- ternary as part of larger expression
+loc y = (false ? 1 : 2) + 10
+check(y == 12, "ternary in addition")
+
+-- assignment
+loc z = false
+loc r = z ? "a" : "b"
+check(r == "b", "assign result")
+
+-- and/or precedence
+check((true or false ? "or-true" : "or-false") == "or-true",  "or lower prec")
+check((false and true ? "and-true" : "and-false") == "and-false", "and lower prec")
+
+-- string concat in branches
+check((true ? "ab" + "cd" : "ef") == "abcd", "concat then-branch")
+
+-- function call in branches
+func pick(flag) {
+    return flag ? "from-func" : "nope"
+}
+check(pick(true) == "from-func", "call with ternary arg")
+
+-- condition can be a call
+func isEven(num) {
+    return num % 2 == 0
+}
+check((isEven(4) ? "even" : "odd") == "even", "call as condition")
+
+-- ternary in print and table literal
+loc t = {flag: (true ? 1 : 0), other: (false ? "x" : "y")}
+check(t.flag == 1 and t.other == "y", "ternary in table literal")
+
+-- empty/whitespace variants
+check((1 == 1 ? 5 : 6) == 5, "spaces")
+
+-- multi value forwarding must NOT leak through ternary
+func pair() {
+    return 10, 20
+}
+loc a, b = (true ? pair() : 99)
+check(a == 10 and b == nil, "no multi-forward via ternary")
+
+if (fails == 0) {
+    print("ALL TERNARY TESTS PASSED")
+} else {
+    print("TERNARY FAILURES:", fails)
+    exit(1)
+}

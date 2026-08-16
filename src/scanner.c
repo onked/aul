@@ -114,6 +114,44 @@ static Token string() {
     return makeToken(TOKEN_STRING);
 }
 
+static Token backtickString() {
+    int depth = 0;
+    for (;;) {
+        char c = peek();
+        if (isAtEnd()) return errorToken("Unterminated string.");
+        if (c == '`' && depth == 0) {
+            advance();
+            break;
+        }
+        if (c == '\\') {
+            advance();
+            if (isAtEnd()) break;
+            advance();
+            continue;
+        }
+        if (depth > 0) {
+            if (c == '"' || c == '`') {
+                char quote = c;
+                advance();
+                while (!isAtEnd() && peek() != quote) {
+                    if (peek() == '\\') advance();
+                    advance();
+                }
+                if (!isAtEnd()) advance();
+                continue;
+            }
+            if (c == '{') depth++;
+            else if (c == '}') depth--;
+            advance();
+            continue;
+        }
+        if (c == '{') depth = 1;
+        if (c == '\n') scanner.line++;
+        advance();
+    }
+    return makeToken(TOKEN_STRING);
+}
+
 static Token number() {
     while (isDigit(peek())) advance();
 
@@ -242,7 +280,10 @@ Token scanToken() {
             return makeToken(match('=') ? TOKEN_SLASH_EQUAL : TOKEN_SLASH);
         case '%':
             return makeToken(TOKEN_PERCENT);
+        case '?':
+            return makeToken(TOKEN_QUESTION);
         case '"': return string();
+        case '`': return backtickString();
     }
 
     return errorToken("Unexpected character.");

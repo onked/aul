@@ -1,0 +1,31 @@
+loc name = "world"
+loc age = 25
+print(`Hello, {name}!`)
+print(`You are {age} years old.`)
+print(`2 + 3 = {2 + 3}`)
+print(`Nested: {`{name}`}`)
+print(`Quotes: "double" and 'single' inside backticks`)
+print(`Escaped: \{name\} and \`not interp\``)
+loc result = `{age + 1}`
+print(result)
+func pair() {
+    return 10, 20
+}
+loc a, b = pair()
+print(a, b)
+loc c, d = `{pair()}`
+print(c, d)
+print(`{ {1, 2, 3}[2] }`)
+print(`{table.getn({4, 5})}`)
+loc x = 7
+print(`x squared = {x * x}`)
+print(`{1.5 + 2.5}`)
+loc t = {name: "bob", age: 30}
+print(`{t.name} is {t.age}`)
+loc items = {1, 2, 3, 4}
+print(`has {#items} items`)
+print(`multi-line:
+  hello {name}
+  {1 + 1}`)
+print(`deep: {`nested {name}`}`)
+print(`{`a`} {`b`}`)

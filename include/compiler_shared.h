@@ -54,6 +54,7 @@ typedef struct {
 typedef enum {
     PREC_NONE,
     PREC_ASSIGNMENT,
+    PREC_TERNARY,
     PREC_OR,
     PREC_AND,
     PREC_EQUALITY,
@@ -104,6 +105,7 @@ int literal(bool canAssign);
 int call(int leftReg);
 int and_(int leftReg);
 int or_(int leftReg);
+int ternary(int leftReg);
 int tableLiteral(bool canAssign);
 int subscript(int leftReg);
 int dotAccess(int leftReg);
