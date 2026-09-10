@@ -157,14 +157,40 @@ static void returnStatement() {
     }
 }
 
-static void function() {
+static int loadQualifiedBase(Token* name) {
+    int local = resolveLocalInCompiler(current, name);
+    if (local != -1) return local;
+    int up = resolveUpvalue(current, name);
+    if (up != -1) {
+        int dest = allocateRegister();
+        bool ro = current->upvalues[up].readonly;
+        emitABC(ro ? OP_GET_READONLY_UPVALUE : OP_GET_UPVALUE, dest, up, 0);
+        return dest;
+    }
+    int dest = allocateRegister();
+    uint16_t idx = makeConstant(OBJ_VAL(copyString(name->start, name->length)));
+    emitABx(OP_GET_GLOBAL, dest, idx);
+    return dest;
+}
+
+static void functionDeclaration(bool isLocalPrefix) {
     consume(TOKEN_IDENTIFIER, "Expect function name.");
-    Token name = parser.previous;
-    uint16_t nameIdx = makeConstant(OBJ_VAL(copyString(name.start, name.length)));
+    Token chain[32];
+    int chainLen = 0;
+    chain[chainLen++] = parser.previous;
+    while (match(TOKEN_DOT)) {
+        consume(TOKEN_IDENTIFIER, "Expect identifier after '.'.");
+        if (chainLen >= 32) {
+            errorAt(&parser.previous, "Too many dots in function name.");
+            break;
+        }
+        chain[chainLen++] = parser.previous;
+    }
+    Token funcName = chain[chainLen - 1];
 
     Compiler compiler;
     initCompiler(&compiler, current);
-    current->function->name = copyString(name.start, name.length);
+    current->function->name = copyString(funcName.start, funcName.length);
 
     consume(TOKEN_LEFT_PAREN, "Expect '(' after function name.");
     if (!check(TOKEN_RIGHT_PAREN)) {
@@ -199,11 +225,32 @@ static void function() {
         writeChunk(compilingChunk, functionObj->upvalues[i].index, parser.previous.line);
     }
 
-    if (current->enclosing == NULL) {
-        emitABx(OP_DEFINE_GLOBAL, closureReg, nameIdx);
+    if (chainLen == 1) {
+        uint16_t nameIdx = makeConstant(OBJ_VAL(copyString(funcName.start, funcName.length)));
+        if (isLocalPrefix) {
+            addLocal(funcName, closureReg);
+        } else if (current->enclosing == NULL) {
+            emitABx(OP_DEFINE_GLOBAL, closureReg, nameIdx);
+        } else {
+            addLocal(funcName, closureReg);
+        }
     } else {
-        addLocal(name, closureReg);
+        int baseReg = loadQualifiedBase(&chain[0]);
+        for (int i = 1; i < chainLen - 1; i++) {
+            int keyReg = allocateRegister();
+            emitABx(OP_CONSTANT, keyReg, makeConstant(OBJ_VAL(copyString(chain[i].start, chain[i].length))));
+            int nextReg = allocateRegister();
+            emitABC(OP_GET_TABLE, nextReg, baseReg, keyReg);
+            baseReg = nextReg;
+        }
+        int keyReg = allocateRegister();
+        emitABx(OP_CONSTANT, keyReg, makeConstant(OBJ_VAL(copyString(funcName.start, funcName.length))));
+        emitABC(OP_SET_TABLE, baseReg, keyReg, closureReg);
     }
+}
+
+static void function() {
+    functionDeclaration(false);
 }
 
 int functionExpr(bool canAssign) {
@@ -629,6 +676,10 @@ static void reuseRegisters() {
 
 void declaration() {
     if (match(TOKEN_LOC)) {
+        if (match(TOKEN_FUNC)) {
+            functionDeclaration(true);
+            return;
+        }
         Token names[250];
         int nameCount = 0;
         consume(TOKEN_IDENTIFIER, "Expect variable name.");

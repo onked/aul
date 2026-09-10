@@ -98,6 +98,21 @@ ObjError* newError(Value message, int line, ObjString* traceback) {
     return error;
 }
 
+ObjVector2* newVector2(float x, float y) {
+    ObjVector2* vec = (ObjVector2*)allocateObject(sizeof(ObjVector2), OBJ_VECTOR2);
+    vec->x = x;
+    vec->y = y;
+    return vec;
+}
+
+ObjVector3* newVector3(float x, float y, float z) {
+    ObjVector3* vec = (ObjVector3*)allocateObject(sizeof(ObjVector3), OBJ_VECTOR3);
+    vec->x = x;
+    vec->y = y;
+    vec->z = z;
+    return vec;
+}
+
 static uint32_t hashString(const char* key, int length) {
     uint32_t hash = 2166136261u;
     for (int i = 0; i < length; i++) {

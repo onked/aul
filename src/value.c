@@ -69,6 +69,20 @@ void printValue(Value value) {
             } else {
                 printValue(error->message);
             }
+        } else if (IS_VECTOR2(value)) {
+            ObjVector2* v = AS_VECTOR2(value);
+            if (v->x == (float)(int)v->x && v->y == (float)(int)v->y) {
+                printf("Vector2(%.0f, %.0f)", v->x, v->y);
+            } else {
+                printf("Vector2(%g, %g)", v->x, v->y);
+            }
+        } else if (IS_VECTOR3(value)) {
+            ObjVector3* v = AS_VECTOR3(value);
+            if (v->x == (float)(int)v->x && v->y == (float)(int)v->y && v->z == (float)(int)v->z) {
+                printf("Vector3(%.0f, %.0f, %.0f)", v->x, v->y, v->z);
+            } else {
+                printf("Vector3(%g, %g, %g)", v->x, v->y, v->z);
+            }
         }
     }
 }
@@ -92,6 +106,16 @@ bool valuesEqual(Value a, Value b) {
             ObjString* sa = AS_STRING(a);
             ObjString* sb = AS_STRING(b);
             return sa->length == sb->length && memcmp(sa->chars, sb->chars, sa->length) == 0;
+        }
+        if (IS_VECTOR2(a)) {
+            ObjVector2* va = AS_VECTOR2(a);
+            ObjVector2* vb = AS_VECTOR2(b);
+            return va->x == vb->x && va->y == vb->y;
+        }
+        if (IS_VECTOR3(a)) {
+            ObjVector3* va = AS_VECTOR3(a);
+            ObjVector3* vb = AS_VECTOR3(b);
+            return va->x == vb->x && va->y == vb->y && va->z == vb->z;
         }
         return AS_OBJ(a) == AS_OBJ(b);
     }

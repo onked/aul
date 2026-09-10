@@ -12,7 +12,9 @@ typedef enum {
     OBJ_UPVALUE,
     OBJ_TABLE,
     OBJ_NATIVE,
-    OBJ_ERROR
+    OBJ_ERROR,
+    OBJ_VECTOR2,
+    OBJ_VECTOR3
 } ObjType;
 
 typedef void (*NativeFn)(int argCount, Value* args, Value* result);
@@ -95,6 +97,19 @@ typedef struct {
     ObjString* traceback;
 } ObjError;
 
+typedef struct {
+    Obj obj;
+    float x;
+    float y;
+} ObjVector2;
+
+typedef struct {
+    Obj obj;
+    float x;
+    float y;
+    float z;
+} ObjVector3;
+
 struct ObjString {
     Obj obj;
     int length;
@@ -111,6 +126,9 @@ struct ObjString {
 #define IS_TABLE(value)     isObjType(value, OBJ_TABLE)
 #define IS_NATIVE(value)    isObjType(value, OBJ_NATIVE)
 #define IS_ERR(value)       isObjType(value, OBJ_ERROR)
+#define IS_VECTOR2(value)   isObjType(value, OBJ_VECTOR2)
+#define IS_VECTOR3(value)   isObjType(value, OBJ_VECTOR3)
+#define IS_VECTOR(value)    (IS_VECTOR2(value) || IS_VECTOR3(value))
 
 #define AS_CSTRING(value)   (((ObjString*)AS_OBJ(value))->chars)
 #define AS_STRING(value)    ((ObjString*)AS_OBJ(value))
@@ -119,6 +137,8 @@ struct ObjString {
 #define AS_TABLE(value)     ((ObjTable*)AS_OBJ(value))
 #define AS_NATIVE(value)    ((ObjNative*)AS_OBJ(value))
 #define AS_ERR(value)       ((ObjError*)AS_OBJ(value))
+#define AS_VECTOR2(value)   ((ObjVector2*)AS_OBJ(value))
+#define AS_VECTOR3(value)   ((ObjVector3*)AS_OBJ(value))
 
 static inline bool isObjType(Value value, ObjType type) {
     return IS_OBJ(value) && AS_OBJ(value)->type == type;
@@ -130,6 +150,8 @@ ObjClosure* newClosure(ObjFunction* function);
 ObjUpvalue* newUpvalue(Value* slot);
 ObjTable* newTable();
 ObjError* newError(Value message, int line, ObjString* traceback);
+ObjVector2* newVector2(float x, float y);
+ObjVector3* newVector3(float x, float y, float z);
 ObjString* copyString(const char* chars, int length);
 ObjString* takeString(char* chars, int length);
 ObjString* rawString(char* chars, int length, uint32_t hash, int capacity);

@@ -7,6 +7,7 @@
 #include "libs/string.h"
 #include "libs/table.h"
 #include "libs/system.h"
+#include "libs/vector.h"
 #include "vm.h"
 #include "object.h"
 #include "table.h"
@@ -308,4 +309,5 @@ void initNativeLibraries(void) {
     initStringLibrary();
     initTableLibrary();
     initSystemLibrary();
+    initVectorLibrary();
 }

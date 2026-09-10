@@ -99,6 +99,9 @@ void blackenObject(Obj* object) {
         markObject((Obj*)error->traceback);
         break;
     }
+    case OBJ_VECTOR2:
+    case OBJ_VECTOR3:
+        break;
 
     }
 }
@@ -149,6 +152,18 @@ void markRoots() {
     markObject((Obj*)vm.errorMessage);
     markObject((Obj*)vm.errorLine);
     markObject((Obj*)vm.errorTraceback);
+    if (vm.vector2Table) markObject((Obj*)vm.vector2Table);
+    if (vm.vector3Table) markObject((Obj*)vm.vector3Table);
+    markObject((Obj*)vm.vectorX);
+    markObject((Obj*)vm.vectorY);
+    markObject((Obj*)vm.vectorZ);
+    markObject((Obj*)vm.vectorMagnitude);
+    markObject((Obj*)vm.vectorUnit);
+    markObject((Obj*)vm.vectorDot);
+    markObject((Obj*)vm.vectorCross);
+    markObject((Obj*)vm.vectorLerp);
+    markObject((Obj*)vm.vectorMagnitudeStr);
+    markObject((Obj*)vm.vectorNormalize);
     for (int i = 0; i < vm.returnCount; i++) {
         markValue(vm.returnValues[i]);
     }
@@ -232,6 +247,8 @@ void freeObject(Obj* object) {
     case OBJ_TABLE:    objSize = sizeof(ObjTable);    break;
     case OBJ_NATIVE:   objSize = sizeof(ObjNative);   break;
     case OBJ_ERROR:    objSize = sizeof(ObjError);    break;
+    case OBJ_VECTOR2: objSize = sizeof(ObjVector2); break;
+    case OBJ_VECTOR3: objSize = sizeof(ObjVector3); break;
     }
 
     switch (object->type) {
@@ -264,6 +281,9 @@ void freeObject(Obj* object) {
     case OBJ_NATIVE:
         break;
     case OBJ_ERROR:
+        break;
+    case OBJ_VECTOR2:
+    case OBJ_VECTOR3:
         break;
     }
 

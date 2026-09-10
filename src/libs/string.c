@@ -371,6 +371,16 @@ static void strToString(int argCount, Value* args, Value* result) {
         *result = OBJ_VAL(copyString("<function>", 10));
         return;
     }
+    if (IS_VECTOR2(v)) {
+        ObjVector2* vec = AS_VECTOR2(v);
+        char buf[64]; int len = snprintf(buf, sizeof(buf), "Vector2(%g, %g)", vec->x, vec->y);
+        *result = OBJ_VAL(copyString(buf, len)); return;
+    }
+    if (IS_VECTOR3(v)) {
+        ObjVector3* vec = AS_VECTOR3(v);
+        char buf[64]; int len = snprintf(buf, sizeof(buf), "Vector3(%g, %g, %g)", vec->x, vec->y, vec->z);
+        *result = OBJ_VAL(copyString(buf, len)); return;
+    }
     if (IS_INTEGER(v) || IS_NUMBER(v)) {
         char buf[64];
         int len;
@@ -423,6 +433,7 @@ static void strType(int argCount, Value* args, Value* result) {
     else if (IS_STRING(v))              t = "string";
     else if (IS_TABLE(v))               t = "table";
     else if (IS_CLOSURE(v) || IS_NATIVE(v) || IS_FUNCTION(v)) t = "function";
+    else if (IS_VECTOR2(v) || IS_VECTOR3(v)) t = "vector";
     else { *result = NIL_VAL; return; }
     *result = OBJ_VAL(copyString(t, (int)strlen(t)));
 }

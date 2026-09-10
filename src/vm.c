@@ -237,6 +237,18 @@ void initVM()
     vm.errorMessage = copyString("message", 7);
     vm.errorLine = copyString("line", 4);
     vm.errorTraceback = copyString("traceback", 9);
+    vm.vector2Table = NULL;
+    vm.vector3Table = NULL;
+    vm.vectorX = NULL;
+    vm.vectorY = NULL;
+    vm.vectorZ = NULL;
+    vm.vectorMagnitude = NULL;
+    vm.vectorUnit = NULL;
+    vm.vectorDot = NULL;
+    vm.vectorCross = NULL;
+    vm.vectorLerp = NULL;
+    vm.vectorMagnitudeStr = NULL;
+    vm.vectorNormalize = NULL;
     vm.openString = NIL_VAL;
     vm.openStringReg = -1;
     vm.pendingError = NIL_VAL;
@@ -786,7 +798,13 @@ InterpretResult run(int baseFrame)
             uint32_t inst = FRAME.ip[-1];
             Value bv = REG(GET_C(inst));
             Value av = REG(GET_B(inst));
-            if (IS_INTEGER(av) && IS_INTEGER(bv)) {
+            if (IS_VECTOR2(av) && IS_VECTOR2(bv)) {
+                ObjVector2* a = AS_VECTOR2(av); ObjVector2* b = AS_VECTOR2(bv);
+                REG_SET(GET_A(inst), OBJ_VAL(newVector2(a->x + b->x, a->y + b->y)));
+            } else if (IS_VECTOR3(av) && IS_VECTOR3(bv)) {
+                ObjVector3* a = AS_VECTOR3(av); ObjVector3* b = AS_VECTOR3(bv);
+                REG_SET(GET_A(inst), OBJ_VAL(newVector3(a->x + b->x, a->y + b->y, a->z + b->z)));
+            } else if (IS_INTEGER(av) && IS_INTEGER(bv)) {
                 int64_t ia = AS_INTEGER(av);
                 int64_t ib = AS_INTEGER(bv);
                 int64_t result;
@@ -869,7 +887,13 @@ InterpretResult run(int baseFrame)
             uint32_t inst = FRAME.ip[-1];
             Value bv = REG(GET_C(inst));
             Value av = REG(GET_B(inst));
-            if (IS_INTEGER(av) && IS_INTEGER(bv)) {
+            if (IS_VECTOR2(av) && IS_VECTOR2(bv)) {
+                ObjVector2* a = AS_VECTOR2(av); ObjVector2* b = AS_VECTOR2(bv);
+                REG_SET(GET_A(inst), OBJ_VAL(newVector2(a->x - b->x, a->y - b->y)));
+            } else if (IS_VECTOR3(av) && IS_VECTOR3(bv)) {
+                ObjVector3* a = AS_VECTOR3(av); ObjVector3* b = AS_VECTOR3(bv);
+                REG_SET(GET_A(inst), OBJ_VAL(newVector3(a->x - b->x, a->y - b->y, a->z - b->z)));
+            } else if (IS_INTEGER(av) && IS_INTEGER(bv)) {
                 int64_t ia = AS_INTEGER(av);
                 int64_t ib = AS_INTEGER(bv);
                 int64_t result;
@@ -896,7 +920,25 @@ InterpretResult run(int baseFrame)
             uint32_t inst = FRAME.ip[-1];
             Value bv = REG(GET_C(inst));
             Value av = REG(GET_B(inst));
-            if (IS_INTEGER(av) && IS_INTEGER(bv)) {
+            if (IS_VECTOR2(av) && IS_VECTOR2(bv)) {
+                ObjVector2* a = AS_VECTOR2(av); ObjVector2* b = AS_VECTOR2(bv);
+                REG_SET(GET_A(inst), OBJ_VAL(newVector2(a->x * b->x, a->y * b->y)));
+            } else if (IS_VECTOR3(av) && IS_VECTOR3(bv)) {
+                ObjVector3* a = AS_VECTOR3(av); ObjVector3* b = AS_VECTOR3(bv);
+                REG_SET(GET_A(inst), OBJ_VAL(newVector3(a->x * b->x, a->y * b->y, a->z * b->z)));
+            } else if (IS_VECTOR2(av) && IS_NUMERIC(bv)) {
+                ObjVector2* a = AS_VECTOR2(av); double d = IS_INTEGER(bv)?(double)AS_INTEGER(bv):valueToNumber(bv);
+                REG_SET(GET_A(inst), OBJ_VAL(newVector2((float)(a->x * d), (float)(a->y * d))));
+            } else if (IS_NUMERIC(av) && IS_VECTOR2(bv)) {
+                double d = IS_INTEGER(av)?(double)AS_INTEGER(av):valueToNumber(av); ObjVector2* b = AS_VECTOR2(bv);
+                REG_SET(GET_A(inst), OBJ_VAL(newVector2((float)(d * b->x), (float)(d * b->y))));
+            } else if (IS_VECTOR3(av) && IS_NUMERIC(bv)) {
+                ObjVector3* a = AS_VECTOR3(av); double d = IS_INTEGER(bv)?(double)AS_INTEGER(bv):valueToNumber(bv);
+                REG_SET(GET_A(inst), OBJ_VAL(newVector3((float)(a->x * d), (float)(a->y * d), (float)(a->z * d))));
+            } else if (IS_NUMERIC(av) && IS_VECTOR3(bv)) {
+                double d = IS_INTEGER(av)?(double)AS_INTEGER(av):valueToNumber(av); ObjVector3* b = AS_VECTOR3(bv);
+                REG_SET(GET_A(inst), OBJ_VAL(newVector3((float)(d * b->x), (float)(d * b->y), (float)(d * b->z))));
+            } else if (IS_INTEGER(av) && IS_INTEGER(bv)) {
                 int64_t ia = AS_INTEGER(av);
                 int64_t ib = AS_INTEGER(bv);
                 int64_t result;
@@ -923,7 +965,19 @@ InterpretResult run(int baseFrame)
             uint32_t inst = FRAME.ip[-1];
             Value bv = REG(GET_C(inst));
             Value av = REG(GET_B(inst));
-            if (IS_NUMERIC(av) && IS_NUMERIC(bv)) {
+            if (IS_VECTOR2(av) && IS_VECTOR2(bv)) {
+                ObjVector2* a = AS_VECTOR2(av); ObjVector2* b = AS_VECTOR2(bv);
+                REG_SET(GET_A(inst), OBJ_VAL(newVector2(a->x / b->x, a->y / b->y)));
+            } else if (IS_VECTOR3(av) && IS_VECTOR3(bv)) {
+                ObjVector3* a = AS_VECTOR3(av); ObjVector3* b = AS_VECTOR3(bv);
+                REG_SET(GET_A(inst), OBJ_VAL(newVector3(a->x / b->x, a->y / b->y, a->z / b->z)));
+            } else if (IS_VECTOR2(av) && IS_NUMERIC(bv)) {
+                ObjVector2* a = AS_VECTOR2(av); double d = IS_INTEGER(bv)?(double)AS_INTEGER(bv):valueToNumber(bv);
+                REG_SET(GET_A(inst), OBJ_VAL(newVector2((float)(a->x / d), (float)(a->y / d))));
+            } else if (IS_VECTOR3(av) && IS_NUMERIC(bv)) {
+                ObjVector3* a = AS_VECTOR3(av); double d = IS_INTEGER(bv)?(double)AS_INTEGER(bv):valueToNumber(bv);
+                REG_SET(GET_A(inst), OBJ_VAL(newVector3((float)(a->x / d), (float)(a->y / d), (float)(a->z / d))));
+            } else if (IS_NUMERIC(av) && IS_NUMERIC(bv)) {
                 double da = IS_INTEGER(av) ? (double)AS_INTEGER(av) : valueToNumber(av);
                 double db = IS_INTEGER(bv) ? (double)AS_INTEGER(bv) : valueToNumber(bv);
                 REG_SET(GET_A(inst), NUMBER_VAL(da / db));
@@ -1362,7 +1416,7 @@ InterpretResult run(int baseFrame)
             Value tableVal = REG(tableReg);
             Value mtVal = REG(mtReg);
             if (!IS_TABLE(tableVal)) {
-                runtimeError("First argument must be a table.");
+                runtimeError("Can only index into tables.");
                 if (vm.pendingError != NIL_VAL) return INTERPRET_RUNTIME_ERROR;
                 RELOAD_FRAME();
 #ifdef __GNUC__
@@ -1460,6 +1514,37 @@ InterpretResult run(int baseFrame)
                         result = error->traceback != NULL ? OBJ_VAL((Obj*)error->traceback) : NIL_VAL;
                     }
                 }
+                REG_SET(dest, result);
+#ifdef __GNUC__
+                DISPATCH_POLL();
+#else
+                break;
+#endif
+            }
+
+            if (IS_VECTOR2(tableVal) || IS_VECTOR3(tableVal)) {
+                Value result = NIL_VAL;
+                bool foundVec = false;
+                if (IS_STRING(keyVal)) {
+                    ObjString* ks = AS_STRING(keyVal);
+                    if (IS_VECTOR2(tableVal)) {
+                        ObjVector2* v = AS_VECTOR2(tableVal);
+                        if (ks->length==1 && (ks->chars[0]=='X' || ks->chars[0]=='x')) { result = NUMBER_VAL(v->x); foundVec = true; }
+                        else if (ks->length==1 && (ks->chars[0]=='Y' || ks->chars[0]=='y')) { result = NUMBER_VAL(v->y); foundVec = true; }
+                        else if (ks->length==9 && (memcmp(ks->chars,"Magnitude",9)==0 || memcmp(ks->chars,"magnitude",9)==0)) { double m = sqrt((double)v->x*v->x + (double)v->y*v->y); result = NUMBER_VAL(m); foundVec = true; }
+                        else if (ks->length==4 && (memcmp(ks->chars,"Unit",4)==0 || memcmp(ks->chars,"unit",4)==0)) { double m = sqrt((double)v->x*v->x + (double)v->y*v->y); if(m==0){ float nan=(float)NAN; result=OBJ_VAL(newVector2(nan,nan)); } else { result=OBJ_VAL(newVector2((float)(v->x/m),(float)(v->y/m))); } foundVec=true; }
+                        else if (vm.vector2Table && tableGet(&vm.vector2Table->fields, keyVal, &result)) { foundVec = true; }
+                    } else {
+                        ObjVector3* v = AS_VECTOR3(tableVal);
+                        if (ks->length==1 && (ks->chars[0]=='X' || ks->chars[0]=='x')) { result = NUMBER_VAL(v->x); foundVec = true; }
+                        else if (ks->length==1 && (ks->chars[0]=='Y' || ks->chars[0]=='y')) { result = NUMBER_VAL(v->y); foundVec = true; }
+                        else if (ks->length==1 && (ks->chars[0]=='Z' || ks->chars[0]=='z')) { result = NUMBER_VAL(v->z); foundVec = true; }
+                        else if (ks->length==9 && (memcmp(ks->chars,"Magnitude",9)==0 || memcmp(ks->chars,"magnitude",9)==0)) { double m = sqrt((double)v->x*v->x + (double)v->y*v->y + (double)v->z*v->z); result = NUMBER_VAL(m); foundVec = true; }
+                        else if (ks->length==4 && (memcmp(ks->chars,"Unit",4)==0 || memcmp(ks->chars,"unit",4)==0)) { double m = sqrt((double)v->x*v->x + (double)v->y*v->y + (double)v->z*v->z); if(m==0){ float nan=(float)NAN; result=OBJ_VAL(newVector3(nan,nan,nan)); } else { result=OBJ_VAL(newVector3((float)(v->x/m),(float)(v->y/m),(float)(v->z/m))); } foundVec=true; }
+                        else if (vm.vector3Table && tableGet(&vm.vector3Table->fields, keyVal, &result)) { foundVec = true; }
+                    }
+                }
+                if (!foundVec) result = NIL_VAL;
                 REG_SET(dest, result);
 #ifdef __GNUC__
                 DISPATCH_POLL();
@@ -1715,7 +1800,13 @@ InterpretResult run(int baseFrame)
 #endif
         {
             Value val = REG(GET_B(instruction));
-            if (IS_INTEGER(val)) {
+            if (IS_VECTOR2(val)) {
+                ObjVector2* v = AS_VECTOR2(val);
+                REG_SET(GET_A(instruction), OBJ_VAL(newVector2(-v->x, -v->y)));
+            } else if (IS_VECTOR3(val)) {
+                ObjVector3* v = AS_VECTOR3(val);
+                REG_SET(GET_A(instruction), OBJ_VAL(newVector3(-v->x, -v->y, -v->z)));
+            } else if (IS_INTEGER(val)) {
                 STORE_INT(GET_A(instruction), -AS_INTEGER(val));
             } else if (IS_NUMBER(val)) {
                 REG(GET_A(instruction)) = NUMBER_VAL(-AS_NUMBER(val));

@@ -78,6 +78,19 @@ typedef struct {
     struct ObjString* errorLine;
     struct ObjString* errorTraceback;
 
+    struct ObjTable* vector2Table;
+    struct ObjTable* vector3Table;
+    struct ObjString* vectorX;
+    struct ObjString* vectorY;
+    struct ObjString* vectorZ;
+    struct ObjString* vectorMagnitude;
+    struct ObjString* vectorUnit;
+    struct ObjString* vectorDot;
+    struct ObjString* vectorCross;
+    struct ObjString* vectorLerp;
+    struct ObjString* vectorMagnitudeStr;
+    struct ObjString* vectorNormalize;
+
     Value openString;
     int openStringReg;
 

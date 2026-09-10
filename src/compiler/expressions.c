@@ -277,7 +277,12 @@ int unary(bool canAssign) {
     (void)canAssign;
     TokenType operatorType = parser.previous.type;
     int argReg = parsePrecedence(PREC_UNARY);
-    int destReg = argReg;
+    int destReg;
+    if (regIsBoundToLocal(argReg)) {
+        destReg = allocateRegister();
+    } else {
+        destReg = argReg;
+    }
     
     switch (operatorType) {
         case TOKEN_MINUS: emitABC(OP_NEGATE, destReg, argReg, 0); break;
@@ -286,7 +291,7 @@ int unary(bool canAssign) {
             emitABC(OP_NOT, destReg, argReg, 0);
             break;
         case TOKEN_HASH:
-            destReg = allocateRegister();
+            if (destReg == argReg) destReg = allocateRegister();
             emitABC(OP_LENGTH, destReg, argReg, 0);
             break;
         default: return 0;

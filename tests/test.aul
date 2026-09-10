@@ -14,6 +14,8 @@ print(false);
 print(!true);
 print(!false);
 print(!nil);
+print(not true);
+print(not false);
 
 -- Test 3: Comparison operators
 print("=== Comparisons ===");
@@ -56,11 +58,16 @@ while (j < 5) {
     print(j);
 }
 
--- Test 7: for loop
+-- Test 7: for loop (C-style) + for-in
 print("=== For Loop ===");
 for (loc k = 0; k < 3; k = k + 1) {
     print(k);
 }
+print("=== For In ===");
+loc tFor = {10, 20, 30};
+for (k, v in tFor) { print(k, v); }
+loc map = {"a": 1, "b": 2};
+for (k, v in map) { print(k, v); }
 
 -- Test 8: and/or short-circuit
 print("=== And/Or ===");
@@ -69,7 +76,7 @@ print(true and false);
 print(false or true);
 print(false or false);
 
--- Test 9: Tables
+-- Test 9: Tables (array, hash, literals)
 print("=== Tables ===");
 loc t = {1: "one", 2: "two", 3: "three"};
 print(t[1]);
@@ -77,6 +84,12 @@ print(t[2]);
 t[1] = "ONE";
 print(t[1]);
 print(#t);
+loc arr = {1, 2, 3};
+print(arr[1], arr[2], arr[3], #arr);
+loc kv = {x: 10, y: 20};
+print(kv.x, kv["y"]);
+loc mixed = {1, 2, 3, foo: "bar"};
+print(mixed[1], mixed.foo);
 
 -- Test 10: Tables with string keys
 print("=== String Keys ===");
@@ -93,8 +106,8 @@ loc obj = {
 };
 obj["greet"]();
 
--- Test 12: Metatables with __index
-print("=== Metatable __index ===");
+-- Test 12: Metatables with __index/__newindex/__call/__len/__add
+print("=== Metatables ===");
 loc proto = {
     "say": func() {
         print("from proto");
@@ -103,9 +116,16 @@ loc proto = {
 loc child = {};
 setmetatable(child, {"__index": proto});
 child["say"]();
-
--- Test 13: Metatable __call
-print("=== Metatable __call ===");
+-- __add
+loc VecMeta = {};
+VecMeta["__add"] = func(a,b) { return {x: a.x + b.x, y: a.y + b.y}; };
+loc vA = {x: 1, y: 2}; setmetatable(vA, VecMeta);
+loc vB = {x: 3, y: 4}; setmetatable(vB, VecMeta);
+loc vC = vA + vB; print(vC.x, vC.y);
+-- __len
+loc lenMT = {"__len": func(self) { return 42; }};
+loc tLen = {}; setmetatable(tLen, lenMT); print(#tLen);
+-- __call
 loc callable = {};
 setmetatable(callable, {
     "__call": func(self) {
@@ -116,7 +136,20 @@ setmetatable(callable, {
 loc result = callable();
 print(result);
 
--- Test 14: Closures with upvalues
+-- Test 13: Method sugar obj:method
+print("=== Method Sugar ===");
+loc Counter = {count: 10};
+func Counter.inc(self, n) { self.count = self.count + n; return self.count; }
+print(Counter:inc(5));
+loc Box = {val: 5};
+Box.get = func(self) { return self.val; };
+print(Box:get());
+-- chaining
+loc Achain = {n: 10};
+Achain.inc = func(self) { self.n = self.n + 1; return self; };
+print(Achain:inc():inc().n);
+
+-- Test 14: Closures with upvalues + readonly
 print("=== Closures ===");
 func makeCounter() {
     loc count = 0;
@@ -131,6 +164,10 @@ print(c1());
 loc c2 = makeCounter();
 print(c2());
 print(c1());
+-- readonly upvalue (no mutation)
+loc ro = 5;
+func readRO() { return ro; }
+print(readRO());
 
 -- Test 15: Nested if
 print("=== Nested If ===");
@@ -140,10 +177,18 @@ if (true) {
     }
 }
 
--- Test 16: String concatenation
-print("=== String Concatenation ===");
+-- Test 16: String concatenation + escapes + interpolation
+print("=== String Concatenation & Escapes ===");
 loc s = "hello" + " " + "world";
 print(s);
+print("a\nb\tc\x41");
+print(`interp {s} len={#s}`);
+loc n = 5;
+print(`a {n} b {n*2} c`);
+-- multiline & escaped
+print(`line1
+line2 {1+2}`);
+print(`\{not interp\}`);
 
 -- Test 17: Compound assignments
 print("=== Compound Assignments ===");
@@ -164,7 +209,155 @@ z++;
 print(z);
 z++;
 print(z);
-z = z + 1
-print(z)
+z = z + 1;
+print(z);
+print(#"hello", #"");
+
+-- Test 19: Ternary
+print("=== Ternary ===");
+print(true ? "yes" : "no");
+print(false ? 1 : 2);
+print((5 > 3) ? 10 : 20);
+loc tern = (true and false) ? 1 : 99;
+print(tern);
+-- nested
+print(true ? false ? 1 : 2 : 3);
+
+-- Test 20: Multiple return values
+print("=== Multi Return ===");
+func ret3() { return 1, 2, 3; }
+loc a,b,c = ret3();
+print(a,b,c);
+loc aa,bb,cc,dd = ret3();
+print(aa,bb,cc,dd); -- dd=nil
+loc p,q = ret3();
+print(p,q);
+-- bare call forwarding vs expression
+func fwd() { return ret3(); }
+loc x1,x2,x3 = fwd();
+print(x1,x2,x3); -- only first forwarded (return f() is not multi)
+func fwd2() { loc r1,r2,r3 = ret3(); return r1,r2,r3; }
+loc y1,y2,y3 = fwd2();
+print(y1,y2,y3);
+
+-- Test 21: Variadic functions
+print("=== Varargs ===");
+func vargs(a, ...) {
+    loc b,c = ...;
+    return a, b, c;
+}
+loc va,vb,vc = vargs(10, 20, 30);
+print(va,vb,vc);
+func pass(...) { return ...; }
+loc pa,pb = pass(7,8,9);
+print(pa,pb);
+func sumAll(...) {
+    loc s = 0;
+    for (k,v in {...}) { s = s + v; }
+    -- manual via ...
+    return s;
+}
+-- simple forward
+func caller(a, ...) { return vargs(a, ...); }
+print(caller(1,2,3));
+
+-- Test 22: Exceptions + error objects
+print("=== Exceptions ===");
+try {
+    error("oops");
+} catch (e) {
+    print(e.message);
+    print(e.line);
+    -- e.traceback exists
+    print(e.traceback != nil);
+}
+-- assert
+try {
+    assert(false, "fail");
+} catch (e) { print(e.message); }
+assert(true, "ok");
+-- rethrow inside catch
+try {
+    try { error("inner"); } catch (e) { error(e.message); }
+} catch (e) { print(e.message); }
+
+-- Test 23: Qualified function declarations (new)
+print("=== Qualified Func ===");
+loc M = {};
+func M.foo(a,b) { return a+b; }
+print(M.foo(2,3));
+loc func M.bar(x) { return x*2; }
+print(M.bar(10));
+M.Sub = {};
+func M.Sub.hello() { return "sub hello"; }
+print(M.Sub.hello());
+-- inside function qualified
+func outerQF() {
+    loc Inner = {};
+    func Inner.test() { return 123; }
+    print(Inner.test());
+    loc func Inner.test2() { return 456; }
+    print(Inner.test2());
+}
+outerQF();
+-- loc func without qualifier (local function)
+loc func localQF() { return 99; }
+print(localQF());
+
+-- Test 24: Native Vectors Vector2/Vector3 (heap, fast-path)
+print("=== Native Vectors ===");
+loc v2a = Vector2.new(3,4);
+loc v2b = Vector2.new(1,2);
+print(v2a, v2b);
+print(v2a.X, v2a.Y, v2a.x, v2a.y);
+print(v2a.Magnitude, v2a.magnitude);
+print(v2a.Unit);
+print(Vector2.new(0,0).Unit); -- NaN
+print(v2a + v2b, v2a - v2b, v2a * 2, 2 * v2a, v2a * v2b, v2a / 2);
+print(-v2a);
+print(v2a:Dot(v2b), v2a:Cross(v2b), v2a:Lerp(v2b,0.5), v2a:Angle(v2b));
+print(Vector2.Max(v2a,v2b), Vector2.Min(v2a,v2b));
+print(Vector2.Clamp(Vector2.new(5,-1), Vector2.new(0,0), Vector2.new(3,3)));
+print(Vector2.Floor(Vector2.new(1.7,2.3)), Vector2.Ceil(Vector2.new(1.2,2.8)));
+print(Vector2.Abs(Vector2.new(-1,-2)), Vector2.Sign(Vector2.new(-5,0)));
+print(Vector2.new(1,2) == Vector2.new(1,2), Vector2.new(1,2) == Vector2.new(2,1));
+print(type(v2a), typeof(v2a), tostring(v2a));
+
+loc v3a = Vector3.new(1,2,2);
+loc v3b = Vector3.new(2,0,0);
+print(v3a, v3b);
+print(v3a.X, v3a.Y, v3a.Z);
+print(v3a.Magnitude, v3a.Unit);
+print(v3a + v3b, v3a - v3b, v3a * 2, 3 * v3a, v3a * v3b, v3a / 2);
+print(-v3a);
+print(v3a:Dot(v3b), v3a:Cross(v3b), v3a:Lerp(v3b,0.5));
+print(v3a:Angle(v3b), v3a:Angle(v3b, Vector3.new(0,0,1)));
+print(Vector3.Clamp(Vector3.new(5,5,5), Vector3.new(0,0,0), Vector3.new(1,1,1)));
+print(type(v3a), typeof(v3a));
+-- vector lib compat
+print(vector.create(1,2,3), vector.magnitude(v3a), vector.normalize(v3a), vector.dot(v3a,v3b));
+print(vector.zero, vector.one, vector.zero2, vector.one2);
+-- ensure qualified func still works with vectors
+loc MV = {};
+func MV.useVec(v) { return v + Vector2.new(1,1); }
+print(MV.useVec(v2a));
+
+-- Test 25: Standard libs + glo + require
+print("=== Std Libs & glo ===");
+glo myGlo = 123;
+print(myGlo);
+print(math.sqrt(4), math.sin(0), math.floor(1.9), math.type(5));
+print(string.len("hello"), string.upper("hi"), string.sub("hello",1,2));
+loc tt = {};
+table.insert(tt, "a");
+table.insert(tt, "b");
+print(tt[1], tt[2], table.concat(tt, ","));
+print(tostring(42), tonumber("123"), type("hi"), typeof(Vector2.new(1,2)));
+print(require("bench/mymod")[1]);
+
+-- Test 27: Truthiness and not
+print("=== Truthiness ===");
+print(not nil, not false, not true, not 0, not "");
+print(not Vector2.new(1,2));
 
 print("=== All tests passed! ===");
