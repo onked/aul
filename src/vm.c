@@ -249,6 +249,7 @@ void initVM()
     vm.vectorLerp = NULL;
     vm.vectorMagnitudeStr = NULL;
     vm.vectorNormalize = NULL;
+    vm.fileProto = NULL;
     vm.openString = NIL_VAL;
     vm.openStringReg = -1;
     vm.pendingError = NIL_VAL;
@@ -666,6 +667,11 @@ InterpretResult run(int baseFrame)
         [OP_INT_JGT] = &&OP_INT_JGT,
         [OP_INT_JGE] = &&OP_INT_JGE,
         [OP_INT_JE] = &&OP_INT_JE,
+        [OP_VEC_ADD] = &&OP_VEC_ADD,
+        [OP_VEC_SUB] = &&OP_VEC_SUB,
+        [OP_VEC_MUL] = &&OP_VEC_MUL,
+        [OP_VEC_DIV] = &&OP_VEC_DIV,
+        [OP_VEC_NEGATE] = &&OP_VEC_NEGATE,
         [OP_NOT_EQUAL] = &&OP_NOT_EQUAL,
 [OP_SQRT] = &&OP_SQRT,
         [OP_FOR_IN] = &&OP_FOR_IN,
@@ -1545,6 +1551,19 @@ InterpretResult run(int baseFrame)
                     }
                 }
                 if (!foundVec) result = NIL_VAL;
+                REG_SET(dest, result);
+#ifdef __GNUC__
+                DISPATCH_POLL();
+#else
+                break;
+#endif
+            }
+
+            if (IS_FILE(tableVal)) {
+                Value result = NIL_VAL;
+                if (IS_STRING(keyVal) && vm.fileProto) {
+                    tableGet(&vm.fileProto->fields, keyVal, &result);
+                }
                 REG_SET(dest, result);
 #ifdef __GNUC__
                 DISPATCH_POLL();
@@ -2571,6 +2590,135 @@ InterpretResult run(int baseFrame)
                 REG(GET_A(instruction)) = INTEGER_VAL(0);
             } else {
                 STORE_INT(GET_A(instruction), ia % ib);
+            }
+#ifdef __GNUC__
+            DISPATCH();
+#else
+            break;
+#endif
+        }
+
+#ifdef __GNUC__
+        OP_VEC_ADD:
+#else
+        case OP_VEC_ADD:
+#endif
+        {
+            Value bv = REG(GET_C(instruction));
+            Value av = REG(GET_B(instruction));
+            if (IS_VECTOR2(av) && IS_VECTOR2(bv)) {
+                ObjVector2* a = AS_VECTOR2(av); ObjVector2* b = AS_VECTOR2(bv);
+                REG_SET(GET_A(instruction), OBJ_VAL(newVector2(a->x + b->x, a->y + b->y)));
+            } else if (IS_VECTOR3(av) && IS_VECTOR3(bv)) {
+                ObjVector3* a = AS_VECTOR3(av); ObjVector3* b = AS_VECTOR3(bv);
+                REG_SET(GET_A(instruction), OBJ_VAL(newVector3(a->x + b->x, a->y + b->y, a->z + b->z)));
+            } else {
+                runtimeError("Operands must be vectors of same dimension.");
+                if (vm.pendingError != NIL_VAL) return INTERPRET_RUNTIME_ERROR;
+                RELOAD_FRAME();
+            }
+#ifdef __GNUC__
+            DISPATCH();
+#else
+            break;
+#endif
+        }
+
+#ifdef __GNUC__
+        OP_VEC_SUB:
+#else
+        case OP_VEC_SUB:
+#endif
+        {
+            Value bv = REG(GET_C(instruction));
+            Value av = REG(GET_B(instruction));
+            if (IS_VECTOR2(av) && IS_VECTOR2(bv)) {
+                ObjVector2* a = AS_VECTOR2(av); ObjVector2* b = AS_VECTOR2(bv);
+                REG_SET(GET_A(instruction), OBJ_VAL(newVector2(a->x - b->x, a->y - b->y)));
+            } else if (IS_VECTOR3(av) && IS_VECTOR3(bv)) {
+                ObjVector3* a = AS_VECTOR3(av); ObjVector3* b = AS_VECTOR3(bv);
+                REG_SET(GET_A(instruction), OBJ_VAL(newVector3(a->x - b->x, a->y - b->y, a->z - b->z)));
+            } else {
+                runtimeError("Operands must be vectors of same dimension.");
+                if (vm.pendingError != NIL_VAL) return INTERPRET_RUNTIME_ERROR;
+                RELOAD_FRAME();
+            }
+#ifdef __GNUC__
+            DISPATCH();
+#else
+            break;
+#endif
+        }
+
+#ifdef __GNUC__
+        OP_VEC_MUL:
+#else
+        case OP_VEC_MUL:
+#endif
+        {
+            Value bv = REG(GET_C(instruction));
+            Value av = REG(GET_B(instruction));
+            if (IS_VECTOR2(av) && IS_VECTOR2(bv)) {
+                ObjVector2* a = AS_VECTOR2(av); ObjVector2* b = AS_VECTOR2(bv);
+                REG_SET(GET_A(instruction), OBJ_VAL(newVector2(a->x * b->x, a->y * b->y)));
+            } else if (IS_VECTOR3(av) && IS_VECTOR3(bv)) {
+                ObjVector3* a = AS_VECTOR3(av); ObjVector3* b = AS_VECTOR3(bv);
+                REG_SET(GET_A(instruction), OBJ_VAL(newVector3(a->x * b->x, a->y * b->y, a->z * b->z)));
+            } else {
+                runtimeError("Operands must be vectors of same dimension.");
+                if (vm.pendingError != NIL_VAL) return INTERPRET_RUNTIME_ERROR;
+                RELOAD_FRAME();
+            }
+#ifdef __GNUC__
+            DISPATCH();
+#else
+            break;
+#endif
+        }
+
+#ifdef __GNUC__
+        OP_VEC_DIV:
+#else
+        case OP_VEC_DIV:
+#endif
+        {
+            Value bv = REG(GET_C(instruction));
+            Value av = REG(GET_B(instruction));
+            if (IS_VECTOR2(av) && IS_VECTOR2(bv)) {
+                ObjVector2* a = AS_VECTOR2(av); ObjVector2* b = AS_VECTOR2(bv);
+                REG_SET(GET_A(instruction), OBJ_VAL(newVector2(a->x / b->x, a->y / b->y)));
+            } else if (IS_VECTOR3(av) && IS_VECTOR3(bv)) {
+                ObjVector3* a = AS_VECTOR3(av); ObjVector3* b = AS_VECTOR3(bv);
+                REG_SET(GET_A(instruction), OBJ_VAL(newVector3(a->x / b->x, a->y / b->y, a->z / b->z)));
+            } else {
+                runtimeError("Operands must be vectors of same dimension.");
+                if (vm.pendingError != NIL_VAL) return INTERPRET_RUNTIME_ERROR;
+                RELOAD_FRAME();
+            }
+#ifdef __GNUC__
+            DISPATCH();
+#else
+            break;
+#endif
+        }
+
+#ifdef __GNUC__
+        OP_VEC_NEGATE:
+#else
+        case OP_VEC_NEGATE:
+#endif
+        {
+            Value val = REG(GET_B(instruction));
+            if (IS_VECTOR2(val)) {
+                ObjVector2* v = AS_VECTOR2(val);
+                REG_SET(GET_A(instruction), OBJ_VAL(newVector2(-v->x, -v->y)));
+            } else if (IS_VECTOR3(val)) {
+                ObjVector3* v = AS_VECTOR3(val);
+                REG_SET(GET_A(instruction), OBJ_VAL(newVector3(-v->x, -v->y, -v->z)));
+            } else {
+                runtimeError("Operand must be a vector.");
+                if (vm.pendingError != NIL_VAL) return INTERPRET_RUNTIME_ERROR;
+                RELOAD_FRAME();
             }
 #ifdef __GNUC__
             DISPATCH();

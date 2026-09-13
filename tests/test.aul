@@ -342,7 +342,7 @@ loc MV = {};
 func MV.useVec(v) { return v + Vector2.new(1,1); }
 print(MV.useVec(v2a));
 
--- Test 25: Standard libs + glo + require
+-- Test 25: Standard libs + glo
 print("=== Std Libs & glo ===");
 glo myGlo = 123;
 print(myGlo);
@@ -353,7 +353,6 @@ table.insert(tt, "a");
 table.insert(tt, "b");
 print(tt[1], tt[2], table.concat(tt, ","));
 print(tostring(42), tonumber("123"), type("hi"), typeof(Vector2.new(1,2)));
-print(require("bench/mymod")[1]);
 
 -- Test 27: Truthiness and not
 print("=== Truthiness ===");

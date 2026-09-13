@@ -98,7 +98,26 @@ ObjError* newError(Value message, int line, ObjString* traceback) {
     return error;
 }
 
+static ObjVector2* freeVec2 = NULL;
+static ObjVector3* freeVec3 = NULL;
+
 ObjVector2* newVector2(float x, float y) {
+    if (freeVec2) {
+        ObjVector2* vec = freeVec2;
+        freeVec2 = (ObjVector2*)vec->obj.next;
+        vec->x = x; vec->y = y;
+        vec->obj.marked = vm.currentWhite;
+        vec->obj.next = NULL;
+        if (vm.gcPhase == GC_PHASE_SWEEP) {
+            vec->obj.next = vm.newObjects;
+            vm.newObjects = (Obj*)vec;
+        } else {
+            vec->obj.next = vm.objects;
+            vm.objects = (Obj*)vec;
+            if (vm.gcPhase == GC_PHASE_MARK || vm.gcPhase == GC_PHASE_ATOMIC) markObject((Obj*)vec);
+        }
+        return vec;
+    }
     ObjVector2* vec = (ObjVector2*)allocateObject(sizeof(ObjVector2), OBJ_VECTOR2);
     vec->x = x;
     vec->y = y;
@@ -106,11 +125,47 @@ ObjVector2* newVector2(float x, float y) {
 }
 
 ObjVector3* newVector3(float x, float y, float z) {
+    if (freeVec3) {
+        ObjVector3* vec = freeVec3;
+        freeVec3 = (ObjVector3*)vec->obj.next;
+        vec->x = x; vec->y = y; vec->z = z;
+        vec->obj.marked = vm.currentWhite;
+        vec->obj.next = NULL;
+        if (vm.gcPhase == GC_PHASE_SWEEP) {
+            vec->obj.next = vm.newObjects;
+            vm.newObjects = (Obj*)vec;
+        } else {
+            vec->obj.next = vm.objects;
+            vm.objects = (Obj*)vec;
+            if (vm.gcPhase == GC_PHASE_MARK || vm.gcPhase == GC_PHASE_ATOMIC) markObject((Obj*)vec);
+        }
+        return vec;
+    }
     ObjVector3* vec = (ObjVector3*)allocateObject(sizeof(ObjVector3), OBJ_VECTOR3);
     vec->x = x;
     vec->y = y;
     vec->z = z;
     return vec;
+}
+
+void recycleVector(Obj* obj) {
+    if (obj->type == OBJ_VECTOR2) {
+        ObjVector2* v = (ObjVector2*)obj;
+        v->obj.next = (Obj*)freeVec2;
+        freeVec2 = v;
+    } else if (obj->type == OBJ_VECTOR3) {
+        ObjVector3* v = (ObjVector3*)obj;
+        v->obj.next = (Obj*)freeVec3;
+        freeVec3 = v;
+    }
+}
+
+ObjFile* newFile(FILE* file, ObjString* path) {
+    ObjFile* f = (ObjFile*)allocateObject(sizeof(ObjFile), OBJ_FILE);
+    f->file = file;
+    f->closed = false;
+    f->path = path;
+    return f;
 }
 
 static uint32_t hashString(const char* key, int length) {

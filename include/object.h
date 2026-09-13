@@ -1,6 +1,7 @@
 #ifndef aul_object_h
 #define aul_object_h
 
+#include <stdio.h>
 #include "value.h"
 #include "chunk.h"
 #include "table.h"
@@ -14,7 +15,8 @@ typedef enum {
     OBJ_NATIVE,
     OBJ_ERROR,
     OBJ_VECTOR2,
-    OBJ_VECTOR3
+    OBJ_VECTOR3,
+    OBJ_FILE
 } ObjType;
 
 typedef void (*NativeFn)(int argCount, Value* args, Value* result);
@@ -110,6 +112,13 @@ typedef struct {
     float z;
 } ObjVector3;
 
+typedef struct {
+    Obj obj;
+    FILE* file;
+    bool closed;
+    ObjString* path;
+} ObjFile;
+
 struct ObjString {
     Obj obj;
     int length;
@@ -129,6 +138,7 @@ struct ObjString {
 #define IS_VECTOR2(value)   isObjType(value, OBJ_VECTOR2)
 #define IS_VECTOR3(value)   isObjType(value, OBJ_VECTOR3)
 #define IS_VECTOR(value)    (IS_VECTOR2(value) || IS_VECTOR3(value))
+#define IS_FILE(value)      isObjType(value, OBJ_FILE)
 
 #define AS_CSTRING(value)   (((ObjString*)AS_OBJ(value))->chars)
 #define AS_STRING(value)    ((ObjString*)AS_OBJ(value))
@@ -139,6 +149,7 @@ struct ObjString {
 #define AS_ERR(value)       ((ObjError*)AS_OBJ(value))
 #define AS_VECTOR2(value)   ((ObjVector2*)AS_OBJ(value))
 #define AS_VECTOR3(value)   ((ObjVector3*)AS_OBJ(value))
+#define AS_FILE(value)      ((ObjFile*)AS_OBJ(value))
 
 static inline bool isObjType(Value value, ObjType type) {
     return IS_OBJ(value) && AS_OBJ(value)->type == type;
@@ -152,6 +163,8 @@ ObjTable* newTable();
 ObjError* newError(Value message, int line, ObjString* traceback);
 ObjVector2* newVector2(float x, float y);
 ObjVector3* newVector3(float x, float y, float z);
+ObjFile* newFile(FILE* file, ObjString* path);
+void recycleVector(Obj* obj);
 ObjString* copyString(const char* chars, int length);
 ObjString* takeString(char* chars, int length);
 ObjString* rawString(char* chars, int length, uint32_t hash, int capacity);

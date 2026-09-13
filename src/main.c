@@ -8,6 +8,7 @@
 #include "debug.h"
 #include "compiler.h"
 #include "vm.h"
+#include "libs/os.h"
 
 char* readFile(const char* path) {
     FILE* file = fopen(path, "rb");
@@ -57,6 +58,7 @@ static void dumpFunc(ObjFunction* fn, const char* name) {
 
 int main(int argc, const char* argv[]) {
     initVM();
+    osSetArgs(argc, argv);
 
     if (argc == 3 && strcmp(argv[1], "-d") == 0) {
         char* source = readFile(argv[2]);

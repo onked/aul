@@ -91,6 +91,8 @@ typedef struct {
     struct ObjString* vectorMagnitudeStr;
     struct ObjString* vectorNormalize;
 
+    struct ObjTable* fileProto;
+
     Value openString;
     int openStringReg;
 

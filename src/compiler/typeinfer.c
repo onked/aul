@@ -1,5 +1,6 @@
 #include "chunk.h"
 #include "value.h"
+#include "object.h"
 #include "memory.h"
 
 void specializeTypes(Chunk* chunk) {
@@ -37,6 +38,10 @@ void specializeTypes(Chunk* chunk) {
     uint8_t* globalInt = (uint8_t*)reallocate(NULL, 0, nconst > 0 ? nconst : 1);
     memset(globalInt, 0, nconst > 0 ? nconst : 1);
     uint8_t upvalInt[256] = {0};
+    uint8_t isVec[256] = {0};
+    uint8_t* globalVec = (uint8_t*)reallocate(NULL, 0, nconst > 0 ? nconst : 1);
+    memset(globalVec, 0, nconst > 0 ? nconst : 1);
+    uint8_t upvalVec[256] = {0};
 
     for (int i = 0; i < n; i++) {
         uint32_t inst = chunk->code[i];
@@ -50,20 +55,28 @@ void specializeTypes(Chunk* chunk) {
             memset(isInt, 0, sizeof(isInt));
             memset(globalInt, 0, nconst > 0 ? nconst : 1);
             memset(upvalInt, 0, sizeof(upvalInt));
+            memset(isVec, 0, sizeof(isVec));
+            memset(globalVec, 0, nconst > 0 ? nconst : 1);
+            memset(upvalVec, 0, sizeof(upvalVec));
         }
 
         switch (op) {
-            case OP_CONSTANT:
-                isInt[a] = IS_INTEGER(chunk->constants.values[bx]) ? 1 : 0;
+            case OP_CONSTANT: {
+                Value cv = chunk->constants.values[bx];
+                isInt[a] = IS_INTEGER(cv) ? 1 : 0;
+                isVec[a] = IS_VECTOR(cv) ? 1 : 0;
                 break;
+            }
 
             case OP_MOVE:
                 isInt[a] = isInt[b];
+                isVec[a] = isVec[b];
                 break;
 
             case OP_NIL: case OP_TRUE: case OP_FALSE:
             case OP_TABLE: case OP_NOT: case OP_SQRT:
                 isInt[a] = 0;
+                isVec[a] = 0;
                 break;
 
             case OP_INCREMENT: {
@@ -74,64 +87,84 @@ void specializeTypes(Chunk* chunk) {
             }
 
             case OP_NEGATE: {
-                if (isInt[b]) {
+                if (isVec[b]) {
+                    chunk->code[i] = CREATE_ABC(OP_VEC_NEGATE, a, b, 0);
+                    isVec[a] = 1; isInt[a] = 0;
+                } else if (isInt[b]) {
                     chunk->code[i] = CREATE_ABC(OP_INT_NEGATE, a, b, 0);
-                    isInt[a] = 1;
+                    isInt[a] = 1; isVec[a] = 0;
                 } else {
-                    isInt[a] = 0;
+                    isInt[a] = 0; isVec[a] = 0;
                 }
                 break;
             }
 
             case OP_ADD: {
-                if (isInt[b] && isInt[c]) {
+                if (isVec[b] && isVec[c]) {
+                    chunk->code[i] = CREATE_ABC(OP_VEC_ADD, a, b, c);
+                    isVec[a] = 1; isInt[a] = 0;
+                } else if (isInt[b] && isInt[c]) {
                     chunk->code[i] = CREATE_ABC(OP_INT_ADD, a, b, c);
-                    isInt[a] = 1;
+                    isInt[a] = 1; isVec[a] = 0;
                 } else {
-                    isInt[a] = 0;
+                    isInt[a] = 0; isVec[a] = 0;
                 }
                 break;
             }
 
             case OP_ADD_BUF: {
-                if (isInt[b] && isInt[c]) {
+                if (isVec[b] && isVec[c]) {
+                    chunk->code[i] = CREATE_ABC(OP_VEC_ADD, a, b, c);
+                    isVec[a] = 1; isInt[a] = 0;
+                } else if (isInt[b] && isInt[c]) {
                     chunk->code[i] = CREATE_ABC(OP_INT_ADD, a, b, c);
-                    isInt[a] = 1;
+                    isInt[a] = 1; isVec[a] = 0;
                 } else {
-                    isInt[a] = 0;
+                    isInt[a] = 0; isVec[a] = 0;
                 }
                 break;
             }
 
             case OP_SUBTRACT:
-                if (isInt[b] && isInt[c]) {
+                if (isVec[b] && isVec[c]) {
+                    chunk->code[i] = CREATE_ABC(OP_VEC_SUB, a, b, c);
+                    isVec[a] = 1; isInt[a] = 0;
+                } else if (isInt[b] && isInt[c]) {
                     chunk->code[i] = CREATE_ABC(OP_INT_SUBTRACT, a, b, c);
-                    isInt[a] = 1;
+                    isInt[a] = 1; isVec[a] = 0;
                 } else {
-                    isInt[a] = 0;
+                    isInt[a] = 0; isVec[a] = 0;
                 }
                 break;
 
             case OP_MULTIPLY:
-                if (isInt[b] && isInt[c]) {
+                if (isVec[b] && isVec[c]) {
+                    chunk->code[i] = CREATE_ABC(OP_VEC_MUL, a, b, c);
+                    isVec[a] = 1; isInt[a] = 0;
+                } else if (isInt[b] && isInt[c]) {
                     chunk->code[i] = CREATE_ABC(OP_INT_MULTIPLY, a, b, c);
-                    isInt[a] = 1;
+                    isInt[a] = 1; isVec[a] = 0;
                 } else {
-                    isInt[a] = 0;
+                    isInt[a] = 0; isVec[a] = 0;
                 }
                 break;
 
             case OP_MODULO:
                 if (isInt[b] && isInt[c]) {
                     chunk->code[i] = CREATE_ABC(OP_INT_MODULO, a, b, c);
-                    isInt[a] = 1;
+                    isInt[a] = 1; isVec[a] = 0;
                 } else {
-                    isInt[a] = 0;
+                    isInt[a] = 0; isVec[a] = 0;
                 }
                 break;
 
             case OP_DIVIDE:
-                isInt[a] = 0;
+                if (isVec[b] && isVec[c]) {
+                    chunk->code[i] = CREATE_ABC(OP_VEC_DIV, a, b, c);
+                    isVec[a] = 1; isInt[a] = 0;
+                } else {
+                    isInt[a] = 0; isVec[a] = 0;
+                }
                 break;
 
             case OP_LESS:
@@ -175,41 +208,51 @@ void specializeTypes(Chunk* chunk) {
 
             case OP_GET_GLOBAL:
                 isInt[a] = globalInt[bx];
+                isVec[a] = globalVec[bx];
                 break;
 
             case OP_SET_GLOBAL:
                 globalInt[bx] = isInt[a];
+                globalVec[bx] = isVec[a];
                 break;
 
             case OP_DEFINE_GLOBAL:
                 globalInt[bx] = isInt[a];
+                globalVec[bx] = isVec[a];
                 break;
 
             case OP_GET_UPVALUE:
                 isInt[a] = upvalInt[b];
+                isVec[a] = upvalVec[b];
                 break;
 
             case OP_SET_UPVALUE:
                 upvalInt[a] = isInt[b];
+                upvalVec[a] = isVec[b];
                 break;
 
             case OP_GET_READONLY_UPVALUE:
                 isInt[a] = 0;
+                isVec[a] = 0;
                 break;
 
             case OP_FOR_IN:
                 isInt[a + 1] = 0;
                 isInt[a + 2] = 0;
+                isVec[a + 1] = 0;
+                isVec[a + 2] = 0;
                 break;
 
             case OP_TRY:
                 isInt[a] = 0;
+                isVec[a] = 0;
                 break;
 
             case OP_CALL: case OP_GET_TABLE: case OP_GET_METATABLE:
             case OP_LENGTH: case OP_CLOCK: case OP_GET_RET:
             case OP_VARARG:
                 isInt[a] = 0;
+                isVec[a] = 0;
                 break;
 
             case OP_JUMP: case OP_JUMP_IF_FALSE:
@@ -242,9 +285,13 @@ void specializeTypes(Chunk* chunk) {
             memset(isInt, 0, sizeof(isInt));
             memset(globalInt, 0, nconst > 0 ? nconst : 1);
             memset(upvalInt, 0, sizeof(upvalInt));
+            memset(isVec, 0, sizeof(isVec));
+            memset(globalVec, 0, nconst > 0 ? nconst : 1);
+            memset(upvalVec, 0, sizeof(upvalVec));
         }
     }
 
     reallocate(fwdTargets, n, 0);
     reallocate(globalInt, nconst > 0 ? nconst : 1, 0);
+    reallocate(globalVec, nconst > 0 ? nconst : 1, 0);
 }

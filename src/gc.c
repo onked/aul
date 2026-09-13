@@ -102,6 +102,11 @@ void blackenObject(Obj* object) {
     case OBJ_VECTOR2:
     case OBJ_VECTOR3:
         break;
+    case OBJ_FILE: {
+        ObjFile* f = (ObjFile*)object;
+        markObject((Obj*)f->path);
+        break;
+    }
 
     }
 }
@@ -154,6 +159,7 @@ void markRoots() {
     markObject((Obj*)vm.errorTraceback);
     if (vm.vector2Table) markObject((Obj*)vm.vector2Table);
     if (vm.vector3Table) markObject((Obj*)vm.vector3Table);
+    if (vm.fileProto) markObject((Obj*)vm.fileProto);
     markObject((Obj*)vm.vectorX);
     markObject((Obj*)vm.vectorY);
     markObject((Obj*)vm.vectorZ);
@@ -238,6 +244,10 @@ void collectGarbage() {
 }
 
 void freeObject(Obj* object) {
+    if (object->type == OBJ_VECTOR2 || object->type == OBJ_VECTOR3) {
+        recycleVector(object);
+        return;
+    }
     size_t objSize = 0;
     switch (object->type) {
     case OBJ_STRING:  objSize = sizeof(ObjString);  break;
@@ -249,6 +259,7 @@ void freeObject(Obj* object) {
     case OBJ_ERROR:    objSize = sizeof(ObjError);    break;
     case OBJ_VECTOR2: objSize = sizeof(ObjVector2); break;
     case OBJ_VECTOR3: objSize = sizeof(ObjVector3); break;
+    case OBJ_FILE: objSize = sizeof(ObjFile); break;
     }
 
     switch (object->type) {
@@ -285,6 +296,11 @@ void freeObject(Obj* object) {
     case OBJ_VECTOR2:
     case OBJ_VECTOR3:
         break;
+    case OBJ_FILE: {
+        ObjFile* f = (ObjFile*)object;
+        if (f->file && !f->closed) fclose(f->file);
+        break;
+    }
     }
 
     reallocate(object, objSize, 0);

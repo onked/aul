@@ -381,6 +381,12 @@ static void strToString(int argCount, Value* args, Value* result) {
         char buf[64]; int len = snprintf(buf, sizeof(buf), "Vector3(%g, %g, %g)", vec->x, vec->y, vec->z);
         *result = OBJ_VAL(copyString(buf, len)); return;
     }
+    if (IS_FILE(v)) {
+        ObjFile* f = AS_FILE(v);
+        if (f->closed) { *result = OBJ_VAL(copyString("<closed file>", 13)); return; }
+        char buf[128]; int len = snprintf(buf, sizeof(buf), "<file %s>", f->path ? f->path->chars : "?");
+        *result = OBJ_VAL(copyString(buf, len)); return;
+    }
     if (IS_INTEGER(v) || IS_NUMBER(v)) {
         char buf[64];
         int len;
@@ -434,6 +440,7 @@ static void strType(int argCount, Value* args, Value* result) {
     else if (IS_TABLE(v))               t = "table";
     else if (IS_CLOSURE(v) || IS_NATIVE(v) || IS_FUNCTION(v)) t = "function";
     else if (IS_VECTOR2(v) || IS_VECTOR3(v)) t = "vector";
+    else if (IS_FILE(v)) t = "file";
     else { *result = NIL_VAL; return; }
     *result = OBJ_VAL(copyString(t, (int)strlen(t)));
 }

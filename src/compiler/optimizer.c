@@ -1,5 +1,6 @@
 #include "chunk.h"
 #include "value.h"
+#include "compiler.h"
 #include <string.h>
 
 static void adjustJumpsCrossing(Chunk* chunk, int removePos) {
@@ -73,6 +74,7 @@ static bool instReadsReg(uint32_t inst, uint8_t reg) {
         case OP_INT_LESS: case OP_INT_GREATER:
         case OP_INT_LESS_EQUAL: case OP_INT_GREATER_EQUAL:
         case OP_INT_EQUAL:
+        case OP_VEC_ADD: case OP_VEC_SUB: case OP_VEC_MUL: case OP_VEC_DIV:
             return GET_B(inst) == reg || GET_C(inst) == reg;
         case OP_INT_JLT: case OP_INT_JLE: case OP_INT_JGT:
         case OP_INT_JGE: case OP_INT_JE:
@@ -81,7 +83,7 @@ static bool instReadsReg(uint32_t inst, uint8_t reg) {
         case OP_JUMP_IF_FALSE: case OP_GET_METATABLE:
         case OP_GET_UPVALUE: case OP_GET_READONLY_UPVALUE:
         case OP_DEFINE_GLOBAL: case OP_SET_GLOBAL: case OP_SET_UPVALUE:
-        case OP_INT_NEGATE:
+        case OP_INT_NEGATE: case OP_VEC_NEGATE:
             return GET_B(inst) == reg;
         case OP_CALL:
         case OP_INCREMENT:
@@ -132,8 +134,107 @@ void foldCompareJumps(Chunk* chunk) {
     }
 }
 
+static Value foldBinaryConst(Value a, Value b, OpCode op) {
+    if ((op==OP_ADD || op==OP_ADD_BUF) && IS_STRING(a) && IS_STRING(b)) {
+        return NIL_VAL;
+    }
+    bool aInt = IS_INTEGER(a);
+    bool bInt = IS_INTEGER(b);
+    bool aNum = IS_NUMBER(a) || aInt;
+    bool bNum = IS_NUMBER(b) || bInt;
+    if (!aNum || !bNum) return NIL_VAL;
+    double da = aInt ? (double)AS_INTEGER(a) : valueToNumber(a);
+    double db = bInt ? (double)AS_INTEGER(b) : valueToNumber(b);
+    switch (op) {
+        case OP_ADD: case OP_ADD_BUF: {
+            if (aInt && bInt) {
+                int64_t ia = AS_INTEGER(a), ib = AS_INTEGER(b), r;
+                if (!__builtin_add_overflow(ia, ib, &r) && r >= INT48_MIN && r <= INT48_MAX) return INTEGER_VAL(r);
+            }
+            return NUMBER_VAL(da + db);
+        }
+        case OP_SUBTRACT: {
+            if (aInt && bInt) {
+                int64_t ia = AS_INTEGER(a), ib = AS_INTEGER(b), r;
+                if (!__builtin_sub_overflow(ia, ib, &r) && r >= INT48_MIN && r <= INT48_MAX) return INTEGER_VAL(r);
+            }
+            return NUMBER_VAL(da - db);
+        }
+        case OP_MULTIPLY: {
+            if (aInt && bInt) {
+                int64_t ia = AS_INTEGER(a), ib = AS_INTEGER(b), r;
+                if (!__builtin_mul_overflow(ia, ib, &r) && r >= INT48_MIN && r <= INT48_MAX) return INTEGER_VAL(r);
+            }
+            return NUMBER_VAL(da * db);
+        }
+        case OP_DIVIDE: return NUMBER_VAL(da / db);
+        case OP_MODULO: {
+            if (aInt && bInt && AS_INTEGER(b) != 0) {
+                int64_t ia = AS_INTEGER(a), ib = AS_INTEGER(b);
+                if (!(ia == INT64_MIN && ib == -1)) return INTEGER_VAL(ia % ib);
+            }
+            return NIL_VAL;
+        }
+        case OP_EQUAL: return BOOL_VAL(valuesEqual(a,b));
+        case OP_NOT_EQUAL: return BOOL_VAL(!valuesEqual(a,b));
+        case OP_GREATER: return BOOL_VAL(da > db);
+        case OP_LESS: return BOOL_VAL(da < db);
+        case OP_GREATER_EQUAL: return BOOL_VAL(da >= db);
+        case OP_LESS_EQUAL: return BOOL_VAL(da <= db);
+        default: return NIL_VAL;
+    }
+}
+
+static void constantFold(Chunk* chunk) {
+    for (int i = 0; i < chunk->count - 2; i++) {
+        uint32_t c1 = chunk->code[i];
+        uint32_t c2 = chunk->code[i+1];
+        uint32_t bin = chunk->code[i+2];
+        if (GET_OP(c1) != OP_CONSTANT || GET_OP(c2) != OP_CONSTANT) continue;
+        OpCode op = GET_OP(bin);
+        bool isBin = (op==OP_ADD||op==OP_ADD_BUF||op==OP_SUBTRACT||op==OP_MULTIPLY||op==OP_DIVIDE||op==OP_MODULO||op==OP_EQUAL||op==OP_NOT_EQUAL||op==OP_GREATER||op==OP_LESS||op==OP_GREATER_EQUAL||op==OP_LESS_EQUAL);
+        if (!isBin) continue;
+        uint8_t r1 = GET_A(c1), r2 = GET_A(c2);
+        uint8_t b = GET_B(bin), c = GET_C(bin), dst = GET_A(bin);
+        if (b != r1 || c != r2) continue;
+        if (regIsBoundToLocal(r1) || regIsBoundToLocal(r2)) continue;
+        Value va = chunk->constants.values[GET_Bx(c1)];
+        Value vb = chunk->constants.values[GET_Bx(c2)];
+        Value folded = foldBinaryConst(va, vb, op);
+        if (IS_NIL(folded)) continue;
+        uint16_t idx = (uint16_t)addConstant(chunk, folded);
+        chunk->code[i] = CREATE_ABx(OP_CONSTANT, dst, idx);
+        chunk->code[i+1] = CREATE_ABC(OP_NOP, 0, 0, 0);
+        chunk->code[i+2] = CREATE_ABC(OP_NOP, 0, 0, 0);
+    }
+    for (int i = 0; i < chunk->count - 1; i++) {
+        uint32_t c = chunk->code[i];
+        uint32_t u = chunk->code[i+1];
+        if (GET_OP(c) != OP_CONSTANT) continue;
+        OpCode op = GET_OP(u);
+        if (op != OP_NEGATE && op != OP_NOT) continue;
+        uint8_t cr = GET_A(c), urB = GET_B(u), urA = GET_A(u);
+        if (urB != cr) continue;
+        if (regIsBoundToLocal(cr)) continue;
+        Value va = chunk->constants.values[GET_Bx(c)];
+        Value folded = NIL_VAL;
+        if (op == OP_NEGATE) {
+            if (IS_INTEGER(va)) folded = INTEGER_VAL(-AS_INTEGER(va));
+            else if (IS_NUMBER(va)) folded = NUMBER_VAL(-valueToNumber(va));
+        } else if (op == OP_NOT) {
+            bool b = IS_BOOL(va) ? !AS_BOOL(va) : IS_NIL(va);
+            folded = BOOL_VAL(b);
+        }
+        if (IS_NIL(folded) && !IS_NIL(va)) continue;
+        uint16_t idx = (uint16_t)addConstant(chunk, folded);
+        chunk->code[i] = CREATE_ABx(OP_CONSTANT, urA, idx);
+        chunk->code[i+1] = CREATE_ABC(OP_NOP, 0, 0, 0);
+    }
+}
+
 void optimizeChunk(Chunk* chunk) {
     if (chunk->count < 2) return;
+    constantFold(chunk);
 
     for (int i = 0; i < chunk->count - 1; i++) {
         uint32_t inst1 = chunk->code[i];

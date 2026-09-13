@@ -83,6 +83,10 @@ void printValue(Value value) {
             } else {
                 printf("Vector3(%g, %g, %g)", v->x, v->y, v->z);
             }
+        } else if (IS_FILE(value)) {
+            ObjFile* f = AS_FILE(value);
+            if (f->closed) printf("<closed file>");
+            else printf("<file %s>", f->path ? f->path->chars : "?");
         }
     }
 }
