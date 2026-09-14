@@ -324,6 +324,7 @@ export default function App(){
         </div>
       </div>}
     </main>}
+    {view!=='playground' && <footer>© Aul - <a href="https://github.com/onked/aul/blob/main/LICENSE" target="_blank">MIT</a></footer>}
     {view==='playground' && <>
       <div className="pg">
         <div className="pg-tabs">
