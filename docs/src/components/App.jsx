@@ -74,6 +74,7 @@ export default function App(){
   const [running, setRunning] = useState(false)
   const [untitledN, setUntitledN] = useState(1)
   const [docPage, setDocPage] = useState('Installation')
+  const [sideOpen, setSideOpen] = useState(false)
   const [demoCode, setDemoCode] = useState(samples.demo)
   const [demoOut, setDemoOut] = useState(null)
   const [demoRunning, setDemoRunning] = useState(false)
@@ -128,12 +129,6 @@ export default function App(){
     if (active === name) setActive(newName)
   }
 
-  const share = async ()=>{
-    const data = btoa(unescape(encodeURIComponent(JSON.stringify({ f: files, a: active }))))
-    history.replaceState(null, '', '#' + data)
-    await navigator.clipboard.writeText(location.href)
-  }
-
   const run = async ()=>{
     setRunning(true)
     setOut('')
@@ -155,7 +150,6 @@ export default function App(){
       setOut('WASM build missing. Run `make wasm` (needs emsdk on PATH), rebuild the site, and reload.\n' + e.message)
     }
     setRunning(false)
-    share().catch(()=>{})
   }
 
   const showBytecode = async ()=>{
@@ -293,7 +287,8 @@ export default function App(){
         </section>
       </>}
       {view==='docs' && <div className="docs">
-        <aside className="docs-side">
+        {sideOpen && <div className="docs-backdrop" onClick={()=>setSideOpen(false)} />}
+        <aside className={`docs-side ${sideOpen?'open':''}`}>
           {[
             ['getting started', ['Installation', 'Running scripts', 'Embedding']],
             ['language', ['Variables', 'Functions', 'Control flow', 'Errors', 'Strings', 'Tables', 'Closures', 'Modules']],
@@ -303,12 +298,13 @@ export default function App(){
             <div key={head} className="docs-group">
               <div className="docs-head">{head}</div>
               {links.map((n) => (
-                <a key={n} className={`docs-link ${n===docPage?'active':''}`} onClick={()=>setDocPage(n)}>{n}</a>
+                <a key={n} className={`docs-link ${n===docPage?'active':''}`} onClick={()=>{setDocPage(n); setSideOpen(false)}}>{n}</a>
               ))}
             </div>
           ))}
         </aside>
         <div className="docs-body">
+          <button className="docs-menu-btn" onClick={()=>setSideOpen(o=>!o)}>☰ Contents</button>
           {(() => {
             const page = docsPages[docPage]
             if (!page) return <p>Pick something from the sidebar.</p>
