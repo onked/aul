@@ -1,0 +1,142 @@
+:root {
+    --bg: #0d1117;
+    --fg: #c9d1d9;
+    --muted: #8b949e;
+    --accent: #58a6ff;
+    --card: #161b22;
+    --border: #30363d
+}
+
+* {
+    box-sizing: border-box
+}
+
+body {
+    margin: 0;
+    font: 14px/1.6 system-ui, Segoe UI, Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--fg)
+}
+
+nav {
+    position: sticky;
+    top: 0;
+    display: flex;
+    gap: 16px;
+    align-items: center;
+    padding: 12px 20px;
+    background: var(--card);
+    border-bottom: 1px solid var(--border)
+}
+
+nav .logo {
+    font-weight: 700;
+    color: var(--accent);
+    text-decoration: none;
+    font-size: 18px
+}
+
+nav a {
+    color: var(--fg);
+    text-decoration: none
+}
+
+nav a:hover {
+    color: var(--accent)
+}
+
+main {
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 24px
+}
+
+.hero {
+    padding: 24px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    margin-bottom: 24px
+}
+
+h1 {
+    margin: 0 0 8px
+}
+
+h2 {
+    margin: 32px 0 12px;
+    color: var(--accent)
+}
+
+pre {
+    background: #010409;
+    border: 1px solid var(--border);
+    padding: 12px;
+    border-radius: 8px;
+    overflow: auto
+}
+
+code {
+    font: 13px ui-monospace, Consolas, monospace
+}
+
+.btn {
+    display: inline-block;
+    padding: 8px 14px;
+    background: var(--accent);
+    color: #fff;
+    border-radius: 6px;
+    text-decoration: none;
+    margin-right: 8px
+}
+
+.btn.secondary {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--fg)
+}
+
+ul {
+    padding-left: 20px
+}
+
+.cta {
+    margin: 16px 0
+}
+
+.play {
+    display: grid;
+    gap: 12px
+}
+
+#code {
+    width: 100%;
+    min-height: 260px;
+    background: #010409;
+    color: var(--fg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px;
+    font: 13px ui-monospace, Consolas, monospace
+}
+
+#run,
+#share {
+    padding: 8px 12px;
+    background: var(--accent);
+    color: #fff;
+    border: 0;
+    border-radius: 6px;
+    cursor: pointer
+}
+
+#out {
+    min-height: 120px;
+    white-space: pre-wrap
+}
+
+footer {
+    text-align: center;
+    padding: 24px;
+    color: var(--muted)
+}

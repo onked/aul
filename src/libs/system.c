@@ -116,7 +116,12 @@ static void sysRequire(int argCount, Value* args, Value* result) {
                 return;
             }
         }
+#ifdef __EMSCRIPTEN__
+        *result = NIL_VAL;
+        return;
+#else
         exit(70);
+#endif
     }
 
     Value moduleResult = nextFrame->slots[0];

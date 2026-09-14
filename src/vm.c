@@ -6,6 +6,8 @@
 #include <limits.h>
 #ifdef _WIN32
 #include <windows.h>
+#else
+#include <time.h>
 #endif
 
 #include "compiler.h"

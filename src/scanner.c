@@ -75,7 +75,36 @@ static void skipWhitespace() {
                 break;
             case '-':
                 if (peekNext() == '-') {
-                    while (peek() != '\n' && !isAtEnd()) advance();
+                    advance();
+                    advance();
+                    if (peek() == '[') {
+                        const char* save = scanner.current;
+                        int level = 0;
+                        advance();
+                        while (peek() == '=') { level++; advance(); }
+                        if (peek() == '[') {
+                            advance();
+                            for (;;) {
+                                if (isAtEnd()) break;
+                                if (peek() == '\n') scanner.line++;
+                                if (peek() == ']') {
+                                    const char* q = scanner.current + 1;
+                                    int n = 0;
+                                    while (*q == '=') { n++; q++; }
+                                    if (n == level && *q == ']') {
+                                        scanner.current = q + 1;
+                                        break;
+                                    }
+                                }
+                                advance();
+                            }
+                        } else {
+                            scanner.current = save;
+                            while (peek() != '\n' && !isAtEnd()) advance();
+                        }
+                    } else {
+                        while (peek() != '\n' && !isAtEnd()) advance();
+                    }
                 } else {
                     return;
                 }

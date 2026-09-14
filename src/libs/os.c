@@ -20,8 +20,14 @@ static void osExit(int argCount, Value* args, Value* result) {
     int code = 0;
     if (argCount >= 1 && IS_INTEGER(args[0])) code = (int)AS_INTEGER(args[0]);
     else if (argCount >= 1 && IS_NUMBER(args[0])) code = (int)AS_NUMBER(args[0]);
+#ifdef __EMSCRIPTEN__
+    (void)code;
+    *result = NIL_VAL;
+    return;
+#else
     exit(code);
     *result = NIL_VAL;
+#endif
 }
 
 static void osSleep(int argCount, Value* args, Value* result) {
@@ -79,9 +85,14 @@ static void osSetenv(int argCount, Value* args, Value* result) {
 
 static void osExecute(int argCount, Value* args, Value* result) {
     if (argCount < 1 || !IS_STRING(args[0])) { *result = NIL_VAL; return; }
+#ifdef __EMSCRIPTEN__
+    *result = NIL_VAL;
+    return;
+#else
     const char* cmd = AS_STRING(args[0])->chars;
     int r = system(cmd);
     *result = INTEGER_VAL(r);
+#endif
 }
 
 static void osGetCwd(int argCount, Value* args, Value* result) {
