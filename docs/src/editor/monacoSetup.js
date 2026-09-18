@@ -280,7 +280,7 @@ const SNIPPETS = [
   { n: 'if', body: 'if (${1:cond}) {\n\t$0\n}', d: 'if block' },
   { n: 'ifelse', body: 'if (${1:cond}) {\n\t$2\n} else {\n\t$0\n}', d: 'if/else block' },
   { n: 'while', body: 'while (${1:cond}) {\n\t$0\n}', d: 'while loop' },
-  { n: 'for', body: 'for (loc ${1:i} = 0; ${1:i} < ${2:n}; ${1:i} = ${1:i} + 1) {\n\t$0\n}', d: 'C-style for loop' },
+  { n: 'for', body: 'for (loc ${1:i} = 0; ${1:i} < ${2:n}; ${1:i} = ${1:i} + 1) {\n\t$0\n}', d: 'for loop' },
   { n: 'forin', body: 'for (${1:k}, ${2:v} in ${3:table}) {\n\t$0\n}', d: 'for-in loop' },
   { n: 'try', body: 'try {\n\t$1\n} catch (${2:e}) {\n\t$0\n}', d: 'try/catch' },
 ]
@@ -308,7 +308,7 @@ const keywordDocs = {
 const libDocs = {
   Vector2: 'Native 2D vector type. Construct with `Vector2.new(x, y)`.',
   Vector3: 'Native 3D vector type. Construct with `Vector3.new(x, y, z)`.',
-  vector: 'Generic vector helpers (Luau-style). See `vector.create`.',
+  vector: 'Generic vector helpers. See `vector.create`.',
   io: 'File I/O. Handles support `f:read()`, `f:write()`, `f:close()`.',
   os: 'OS access: time, sleep, env, processes, working directory.',
   math: 'Math functions (also available as bare globals).',
